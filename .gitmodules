@@ -1,0 +1,3 @@
+[submodule "docs/themes/hugo-theme-air"]
+	path = docs/themes/hugo-theme-air
+	url = https://github.com/shanemhansen/hugo-theme-air.git
