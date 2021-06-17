@@ -1,0 +1,9 @@
+baseURL = "https:/shane.ai/"
+languageCode = "en-us"
+title = "Prepare your brainus"
+theme="hugo-theme-air"
+
+[params]
+author="shane"
+[author]
+name="shane"
