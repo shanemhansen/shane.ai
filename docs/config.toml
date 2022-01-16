@@ -1,6 +1,6 @@
-baseURL = "https:/shane.ai/"
+baseURL = "https://shane.ai/"
 languageCode = "en-us"
-title = "Prepare your brainus"
+title = "Words from Shane"
 theme="hugo-theme-air"
 
 [params]
