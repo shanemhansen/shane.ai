@@ -13,4 +13,4 @@ https://www.linkedin.com/in/shanemhansen/
 I mostly write about what we call cloud computing these days and what
 used to be called systems engineering because as we all know:
 
-{{< image src="/images/cloud.jpeg" alt="Comic with son asking father what clouds are made of and father responding 'linux servers, mostly'" position="center" style="border-radius: 8px;" >}}
+{{< image src="cloud.jpeg" alt="Comic with son asking father what clouds are made of and father responding 'linux servers, mostly'" position="center" style="border-radius: 8px;" >}}
