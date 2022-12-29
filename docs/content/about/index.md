@@ -8,7 +8,9 @@ type: page
 
 Hey, I'm Shane Hansen. You can find me online:
 
-https://www.linkedin.com/in/shanemhansen/
+- Linkedin: <a href="https://www.linkedin.com/in/shanemhansen/">shanemhansen</a>
+- Github: <a href="https://github.com/shanemhansen">@shanemhansen</a>
+- Email: <a href="mailto:shanemhansen@gmail.com">shanemhansen@gmail.com</a>
 
 I mostly write about what we call cloud computing these days and what
 used to be called systems engineering because as we all know:
