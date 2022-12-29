@@ -2,6 +2,7 @@ baseURL = "https://shane.ai/"
 languageCode = "en-us"
 title = "Words from Shane"
 
+googleAnalytics = 'G-BFC5BJW2FE'
 
 [params]
 author="shane"
