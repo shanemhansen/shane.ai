@@ -1,1 +1,8 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Words from Shane</title><link>https://shane.ai/</link><description>Recent content on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><atom:link href="https://shane.ai/index.xml" rel="self" type="application/rss+xml"/></channel></rss>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Words from Shane</title><link>https://shane.ai/</link><description>Recent content on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><atom:link href="https://shane.ai/index.xml" rel="self" type="application/rss+xml"/><item><title>About Me</title><link>https://shane.ai/about/</link><pubDate>Wed, 28 Dec 2022 14:35:59 -0800</pubDate><guid>https://shane.ai/about/</guid><description>About Me Hey, I&amp;rsquo;m Shane Hansen. You can find me online:
+https://www.linkedin.com/in/shanemhansen/
+I mostly write about what we call cloud computing these days and what used to be called systems engineering because as we all know:</description><content>&lt;h1 id="about-me">About Me&lt;/h1>
+&lt;p>Hey, I&amp;rsquo;m Shane Hansen. You can find me online:&lt;/p>
+&lt;p>&lt;a href="https://www.linkedin.com/in/shanemhansen/">https://www.linkedin.com/in/shanemhansen/&lt;/a>&lt;/p>
+&lt;p>I mostly write about what we call cloud computing these days and what
+used to be called systems engineering because as we all know:&lt;/p>
+&lt;img src="https://shane.ai/images/cloud.jpeg" alt="Comic with son asking father what clouds are made of and father responding &amp;#39;linux servers, mostly&amp;#39;" class="center" style="border-radius: 8px;" /></content></item></channel></rss>
