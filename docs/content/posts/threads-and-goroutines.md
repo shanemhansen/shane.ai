@@ -20,7 +20,8 @@ So after several years of reading oversimplified and flat out incorrect comments
 I've decided to write my own still-over-simplified all in one guide to the difference between a couple popular threads and fiber implementations. In order to keep this a blog post
 and not a novel I'm just going to focus on linux threads, go goroutines, and rust threads.
 
-tl;dr - Rust threads on linux use 8kb of memory, Goroutuines use 2kb. It's a big difference but nowhere near as big as the "kilobytes vs megabytes" claim I often see repeated.
+tl;dr - Rust threads on linux use 8kb of memory, Goroutines use 2kb. It's a big difference but nowhere near as big as the "kilobytes vs megabytes" claim I often see repeated. The magic of goroutines, if it exists, is
+tied up in how those tasks are integration with non-blocking I/O in a userspace scheduler.
 
 I'd like to give you better tools to reason about systems engineering questions like "should we use one thread per client?" "do we need to be async to scale?" "what concurrency architecture should I choose for my next project?"
 
@@ -47,10 +48,8 @@ sysctl -w vm.max_map_count=4000000
 sysctl -w kernel.threads-max=2000000000
 ```
 
-Threads-max is self explanatory, but while I didn't do much deep digging I'm guessing max_map_count literally refers to memory regions allocated as stacks. So more threads = more stacks = more memory maps.
 
-Finally I wrote this simple rust program to allocate a million threads that sleep for 1 second, and then wait for all of them. I haven't published the repo yet
-but if you can run `cargo new --bin` and drop this in `main.rs` you should be able to build/run.
+I wrote this simple rust program to allocate a million threads that sleep for 1 second, and then wait for all of them.
 
 ```rust
 use std::thread;
@@ -65,7 +64,7 @@ fn main() {
         }));
     }
     for handle in handles {
-	handle.join().unwrap();
+    	handle.join().unwrap();
     }
 }
 ```
@@ -135,7 +134,7 @@ go build -o threads main.go
 So right off the bat we see:
 
 1. 16s user time. That's way more than rust. Because the rust example is just a shim making syscalls and go is performing scheduling work in userspace.
-2. 0.68 system time. That's low.
+2. 0.68 system time. That's low because Go asks the kernel to do less.
 3. 2_122_296maxresident)k. 2 gigabytes of RAM resident or just 2KB/goroutine!
 4. My unscientific measurement of virtual memory also reported 2GB.
 
@@ -143,23 +142,23 @@ In this simple benchmark go is over 10x faster at creating a million threads tha
 order of magnitude. It would be a reasonable assumption to say that a non-trivial program would likely exceed 2KB stack starting size and cause it to grow (that's a thing go can do) and so the real memory
 usage of rust & go could converge pretty quickly.
 
-Putting on my practical hat right now: if someone told me they wanted to run a service with a million goroutines I'd be a little nervous. If they told me they needed to run a service with
+Putting on my SRE hat right now: if someone told me they wanted to run a service with a million goroutines I'd be a little nervous. If they told me they needed to run a service with
 a million threads I'd be more nervous because of virtual memory overhead and managing sysctls. But today's hardware is up for the challenge.
 
 So if that's true what's the value of goroutines? I like saving RAM and 2GB is smaller than 8GB, but frankly if I'm changing runtimes and languages for better performance I want closer to 10x real world
-improvement.
+improvement to justify the cost.
 
-I get asked this question all the time while teaching classes. If goroutines are so cheap why can't the kernel just make structures that cheap? If go can get away with small stacks why can't the kernel? Go's
+I get asked this question all the time while teaching Go classes at work. If goroutines are so cheap why can't the kernel just make structures that cheap? If go can get away with small stacks why can't the kernel? Go's
 task switching was initially "cooperative" (technically cooperative but managed by the runtime/compiler not the user) and now it's "preemptive" so it seems like go has to do basically the same context
 switching for goroutines that the kernel does for threads: namely saving/restoring registers.
 
-I'll be honest: I don't entirely know the answer but it comes down to the actual implementation details. Go can get away with allocating smaller stacks because go has always been able to grow the stack if needed. This
-is a capability that is tied to the runtime. Regular programs using the Thread api (or clone or libc wrappers) may not have always been able to count on growable stacks. Because go has a more tightly integrated userspace
+I'll be honest: I don't entirely know the answer but I have some clues. Go can get away with allocating smaller stacks because Go has always been able to grow the stack if needed. This
+is a capability that is tied to the runtime. Regular programs using the rust Thread api (or clone or libc wrappers) may not have always been able to count on growable stacks. Because Go has a more tightly integrated userspace
 scheduler and concurrency primitives sometimes it can context switch with less overhead. For example if one goroutine is writing to a channel and one goroutine is reading to a channel, it's possible go can literally run
 the reader and the writer on the same thread and take a fast path where the writer goroutine calls send and that triggers the current thread to switchto the reader goroutine.
 
-I also suspect (but have no proof) that the go compiler may be able to be less conservative about register state it saves/restores. The linux kernel has to be potentially be ready for more hostile user code. In practice I think
-there might be some ancient legacy registers/flags that the kernel has to handle that the go compiler doesn't.
+I also suspect (but have no proof) that the Go compiler may be able to be less conservative about register state it saves/restores. The linux kernel has to be potentially be ready for more hostile user code. In practice I think
+there might be some ancient legacy registers/flags that the kernel has to handle that the Go compiler doesn't.
 
 So far I've made goroutines sound pretty boring. They are like threads but use same order of magnitude of RAM. They occasionally can be scheduled smartly but I haven't presented any evidence they can be scheduled/context switched
 more efficiently than regular threads. The biggest real benefit I see is that I can use lots of goroutines without worrying as much about configuring system resources.
