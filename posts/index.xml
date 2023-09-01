@@ -1,4 +1,301 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on Words from Shane</title><link>https://shane.ai/posts/</link><description>Recent content in Posts on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Mon, 12 Jun 2023 15:33:25 -0700</lastBuildDate><atom:link href="https://shane.ai/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>Threads and Goroutines</title><link>https://shane.ai/posts/threads-and-goroutines/</link><pubDate>Mon, 12 Jun 2023 15:33:25 -0700</pubDate><guid>https://shane.ai/posts/threads-and-goroutines/</guid><description>So after several years of reading oversimplified and flat out incorrect comments about threads and fibers/goroutines/async/etc and fighting this reaction:
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on Words from Shane</title><link>https://shane.ai/posts/</link><description>Recent content in Posts on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Fri, 01 Sep 2023 14:42:00 -0700</lastBuildDate><atom:link href="https://shane.ai/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>CGO Performance In Go 1.21</title><link>https://shane.ai/posts/cgo-performance-in-go1.21/</link><pubDate>Fri, 01 Sep 2023 14:42:00 -0700</pubDate><guid>https://shane.ai/posts/cgo-performance-in-go1.21/</guid><description>Tl;Dr Cgo calls take about 40ns, about the same time encoding/json takes to parse a single digit integer. On my 20 core machine Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.
+Disclaimer While alot of this article argues that &amp;ldquo;Cgo performance is good actually&amp;rdquo;, please don&amp;rsquo;t take that to mean &amp;ldquo;Cgo is good actually&amp;rdquo;. I&amp;rsquo;ve maintained production applications that use Cgo and non-trivial bindings to lua.</description><content>&lt;h2 id="tl-dr">Tl;Dr&lt;/h2>
+&lt;p>Cgo calls take about 40ns, about the same time &lt;code>encoding/json&lt;/code> takes to parse a single digit integer. On my 20 core machine
+Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.&lt;/p>
+&lt;h2 id="disclaimer">Disclaimer&lt;/h2>
+&lt;p>While alot of this article argues that &amp;ldquo;Cgo performance is good actually&amp;rdquo;, please don&amp;rsquo;t take that to mean &amp;ldquo;Cgo is good actually&amp;rdquo;. I&amp;rsquo;ve
+maintained production applications that use Cgo and non-trivial bindings to lua. Performance was great. Go upgrades were a regular source of toil.
+The drawback to using Cgo is losing Go cross compilation benefits and having to manage c dependencies. These days
+I mainly use Cgo for compatibility and to access libraries that happen to be written in C/C++.&lt;/p>
+&lt;h2 id="cgo-and-performance">Cgo &amp;amp; performance&lt;/h2>
+&lt;p>Cgo performance is poorly understood in Go, and searching for information online
+mixes content from 2 years ago with content from 7 years ago. Cockroach labs wrote a &lt;a href="https://www.cockroachlabs.com/blog/the-cost-and-complexity-of-cgo/">great article&lt;/a>
+that measured performance and touched on the complexities of using Cgo. Since then Go performance has improved quite a but, but everything else they said is relevant.
+My similar benchmarks are 17x faster than what Cockroach labs saw in 2015. Some of that might be hardware by suspect most of it is just improvements
+to Go. Unfortunately I see alot of Go programmers have internalized that &amp;ldquo;Cgo is slow&amp;rdquo; without really knowing
+what it&amp;rsquo;s slow compared to. Cgo is slow compared to a regular function call. It&amp;rsquo;s certainly not slow
+compared to doing any sort of I/O or parsing work.&lt;/p>
+&lt;p>In this post
+I want to build on the idea of &amp;ldquo;&lt;a href="https://gist.github.com/jboner/2841832">latency numbers every programmer should know&lt;/a>&amp;rdquo; to figure
+out where in the context of &amp;ldquo;slow&amp;rdquo; Cgo lands in the heirarchy of
+L1 cache reference -&amp;gt; mutex lock -&amp;gt; main memory reference -&amp;gt; sending a packet on the network. These numbers
+are from 2012 so they are really just here to give us a sense of scale:&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>latency comparison numbers&lt;/th>
+&lt;th>&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>L1 cache reference&lt;/td>
+&lt;td>0.5 ns&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Branch mispredict&lt;/td>
+&lt;td>5 ns&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>L2 cache reference&lt;/td>
+&lt;td>7 ns&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Mutex lock/unlock&lt;/td>
+&lt;td>25 ns&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Main memory reference&lt;/td>
+&lt;td>100 ns&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Compress 1K bytes with Zippy&lt;/td>
+&lt;td>3,000 ns 3 us&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Send 1K bytes over 1 Gbps network&lt;/td>
+&lt;td>10,000 ns 10 us&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Read 4K randomly from SSD*&lt;/td>
+&lt;td>150,000 ns 150 us&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Read 1 MB sequentially from memory&lt;/td>
+&lt;td>250,000 ns 250 us&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Round trip within same datacenter&lt;/td>
+&lt;td>500,000 ns 500 us&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;p>My thesis is: Cgo is has overhead, but it doesn&amp;rsquo;t have as much overhead as it used to and it
+may not have as much overhead as you think.&lt;/p>
+&lt;p>Lets talk about what Cgo is and a teeny bit about how it works. Cgo
+is essentially Go&amp;rsquo;s ffi. When you use Cgo you can call C functions from Go and
+pass information back and forth (subject to some &lt;a href="https://pkg.go.dev/cmd/cgo">rules&lt;/a>). The Go compiler autogenerates some
+functions to bridge between the Go &amp;amp; C and handle
+things like differences in platform calling conventions. There are also mismatches in how blocking
+calls are handled and how stack is allocated that make it impractical/unsafe to run Go and C
+code on the same thread. I won&amp;rsquo;t go too much into the implementation but at a high level &amp;ldquo;Cgo means IPC between threads&amp;rdquo;
+is a good mental model.&lt;/p>
+&lt;h2 id="benchmarking">Benchmarking&lt;/h2>
+&lt;p>Lets write some benchmarks to explore performance . You can follow along at &lt;a href="https://github.com/shanemhansen/cgobench">github.com/shanemhansen/cgobench&lt;/a>. The code in the repo is autogenerated
+from the source &lt;code>org&lt;/code> file for this article using an implementation of Knuth&amp;rsquo;s literate programming. Is it the most productive way to write articles?
+Probably not, but it&amp;rsquo;s fun and frankly playing around with new workflows helps my ADHD brain focus.&lt;/p>
+&lt;p>But I digress. First off we&amp;rsquo;ll put a no-op go function in `bench.go` and do a parallel benchmark. It doesn&amp;rsquo;t do anything
+but it&amp;rsquo;s a great place to start.&lt;/p>
+&lt;p>&lt;code>bench.go&lt;/code>&lt;/p>
+&lt;p>&lt;a id="code-snippet--Call">&lt;/a>&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-go" data-lang="go">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">func&lt;/span> &lt;span style="color:#a6e22e">Call&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#75715e">// I don&amp;#39;t do much. Yet.
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>}
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Now we&amp;rsquo;ll add a simple parallel benchmark helper along with our empty call benchmark. I&amp;rsquo;m going to start out
+with something so simple the compiler can inline and then compare that to a non-inlined call. When comparing
+Go vs Cgo it&amp;rsquo;s important to realize that the Go compiler can&amp;rsquo;t inline Cgo functions.&lt;/p>
+&lt;p>&lt;code>bench_test.go&lt;/code>&lt;/p>
+&lt;p>&lt;a id="code-snippet--BenchmarkCall">&lt;/a>&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-go" data-lang="go">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// helper to cut down on boilerplate
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">func&lt;/span> &lt;span style="color:#a6e22e">pbench&lt;/span>(&lt;span style="color:#a6e22e">b&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">B&lt;/span>, &lt;span style="color:#a6e22e">f&lt;/span> &lt;span style="color:#66d9ef">func&lt;/span>()) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">b&lt;/span>.&lt;span style="color:#a6e22e">RunParallel&lt;/span>(&lt;span style="color:#66d9ef">func&lt;/span>(&lt;span style="color:#a6e22e">pb&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">PB&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">for&lt;/span> &lt;span style="color:#a6e22e">pb&lt;/span>.&lt;span style="color:#a6e22e">Next&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">f&lt;/span>()
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> })
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// Same as above, but explicitly calling the inlineable Call func.
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">func&lt;/span> &lt;span style="color:#a6e22e">BenchmarkEmptyCallInlineable&lt;/span>(&lt;span style="color:#a6e22e">b&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">B&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">b&lt;/span>.&lt;span style="color:#a6e22e">RunParallel&lt;/span>(&lt;span style="color:#66d9ef">func&lt;/span>(&lt;span style="color:#a6e22e">pb&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">PB&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">for&lt;/span> &lt;span style="color:#a6e22e">pb&lt;/span>.&lt;span style="color:#a6e22e">Next&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">Call&lt;/span>()
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> })
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">func&lt;/span> &lt;span style="color:#a6e22e">BenchmarkEmptyCall&lt;/span>(&lt;span style="color:#a6e22e">b&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">B&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">pbench&lt;/span>(&lt;span style="color:#a6e22e">b&lt;/span>, &lt;span style="color:#a6e22e">Call&lt;/span>)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>In the case of benchmarking no-ops it&amp;rsquo;s always good to check and make sure your code didn&amp;rsquo;t get completely optimized away.
+I tend to just look at the disassembled output in &lt;code>BenchmarkEmptyCall&lt;/code> and sure enough I see a convincing `call *%rax` instruction` in the assembly. A non dynamic
+dispatch version would look like: &lt;code>call foo+0x3&lt;/code> but this version is calling a function who&amp;rsquo;s address is in the rax register.&lt;/p>
+&lt;p>Let&amp;rsquo;s compile and examine:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-sh" data-lang="sh">&lt;span style="display:flex;">&lt;span>go test -c
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>objdump -S cgobench.test | grep -A15 &lt;span style="color:#e6db74">&amp;#39;^0.*/cgobench.BenchmarkEmptyCall.pbench.func&amp;#39;&lt;/span>
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-text" data-lang="text">&lt;span style="display:flex;">&lt;span>0000000000522920 &amp;lt;github.com/shanemhansen/cgobench.BenchmarkEmptyCall.pbench.func1&amp;gt;:
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> b.RunParallel(func(pb *testing.PB) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522920: 49 3b 66 10 cmp 0x10(%r14),%rsp
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522924: 76 36 jbe 52295c &amp;lt;github.com/shanemhansen/cgobench.BenchmarkEmptyCall.pbench.func1+0x3c&amp;gt;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522926: 55 push %rbp
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522927: 48 89 e5 mov %rsp,%rbp
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 52292a: 48 83 ec 18 sub $0x18,%rsp
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 52292e: 48 89 44 24 10 mov %rax,0x10(%rsp)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522933: 48 8b 4a 08 mov 0x8(%rdx),%rcx
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522937: 48 89 4c 24 08 mov %rcx,0x8(%rsp)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> for pb.Next() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 52293c: eb 0f jmp 52294d &amp;lt;github.com/shanemhansen/cgobench.BenchmarkEmptyCall.pbench.func1+0x2d&amp;gt;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> f()
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 52293e: 48 8b 54 24 08 mov 0x8(%rsp),%rdx
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522943: 48 8b 02 mov (%rdx),%rax
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> 522946: ff d0 call *%rax
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Now that we&amp;rsquo;ve verified our benchmark we can run it. I&amp;rsquo;m going to run benchmarks with a few different coure count values so we can see how the output changes. While writing this
+post I experimented with some other values and 16 for most benchmarks performance increased linearly with core count up to 16 before it began falling off.
+My machine has 20 cores. On my machine the overhead of the dynamic call is around 1ns and the inlinable version is significantly faster as
+expected. Note that performance generally scales linearly with the number of cores (my laptop has 20).&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-sh" data-lang="sh">&lt;span style="display:flex;">&lt;span>go test -cpu&lt;span style="color:#f92672">=&lt;/span>1,2,4,8,16 -bench EmptyCall
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-text" data-lang="text">&lt;span style="display:flex;">&lt;span>goos: linux
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>goarch: amd64
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>pkg: github.com/shanemhansen/cgobench
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>cpu: 12th Gen Intel(R) Core(TM) i7-12700H
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCallInlineable 1000000000 0.2784 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCallInlineable-2 1000000000 0.1383 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCallInlineable-4 1000000000 0.07377 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCallInlineable-8 1000000000 0.04089 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCallInlineable-16 1000000000 0.02481 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCall 718694536 1.665 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCall-2 1000000000 0.8346 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCall-4 1000000000 0.4443 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCall-8 1000000000 0.2385 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkEmptyCall-16 1000000000 0.1399 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>PASS
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>ok github.com/shanemhansen/cgobench 3.819s
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>So now I can think of &amp;ldquo;go function call&amp;rdquo; cost as &amp;ldquo;a little more expensive than a L1 cache reference&amp;rdquo;.
+What happens if we add a Cgo call?
+Below is a trivial c function to add 2 integers and a go function to call it. Note that although we might
+expect gcc to inline trivial_add, we don&amp;rsquo;t expect Go&amp;rsquo;s compiler to. I did play with some even simpler
+C functions but they didn&amp;rsquo;t really perform better and I prefer having a function I can verify.&lt;/p>
+&lt;p>&lt;code>bench.go&lt;/code>&lt;/p>
+&lt;p>&lt;a id="code-snippet--cgoDefinition">&lt;/a>&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-c" data-lang="c">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">int&lt;/span> &lt;span style="color:#a6e22e">trivial_add&lt;/span>(&lt;span style="color:#66d9ef">int&lt;/span> a, &lt;span style="color:#66d9ef">int&lt;/span> b) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">return&lt;/span> a&lt;span style="color:#f92672">+&lt;/span>b;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>&lt;a id="code-snippet--CallCgo">&lt;/a>&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-go" data-lang="go">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// wow this is easy
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// import &amp;#34;C&amp;#34;
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">func&lt;/span> &lt;span style="color:#a6e22e">CgoCall&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">C&lt;/span>.&lt;span style="color:#a6e22e">trivial_add&lt;/span>(&lt;span style="color:#ae81ff">1&lt;/span>,&lt;span style="color:#ae81ff">2&lt;/span>)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>&lt;code>bench_test.go&lt;/code>&lt;/p>
+&lt;p>&lt;a id="code-snippet--BenchmarkCgo">&lt;/a>&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-go" data-lang="go">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">func&lt;/span> &lt;span style="color:#a6e22e">BenchmarkCgoCall&lt;/span>(&lt;span style="color:#a6e22e">b&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">B&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">pbench&lt;/span>(&lt;span style="color:#a6e22e">b&lt;/span>, &lt;span style="color:#a6e22e">CgoCall&lt;/span>)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>We run benchmarks in the usual way. With single threaded performance Cgo overhead is about 40ns. Performance
+seems to scale linearly with the number of cores up to 8ish so if I had a Cgo-bound workload I might not
+bother putting it on a machine with 32 core, but real workloads usually involve more than just calling a cgo func. We can see:&lt;/p>
+&lt;ol>
+&lt;li>Cgo has 40ns overhead. That sits somewhere between &amp;ldquo;mutex lock&amp;rdquo; and &amp;ldquo;main memory reference&amp;rdquo;.&lt;/li>
+&lt;li>40ns/op is 25 million ops/s. That&amp;rsquo;s pretty good for most projects I&amp;rsquo;ve worked on. At 4ns/op and 16 cores we&amp;rsquo;re getting 250 million ops/s.&lt;/li>
+&lt;li>ops/s throughput does scale roughly linearly with core count until we go from 16-&amp;gt;32.&lt;/li>
+&lt;/ol>
+&lt;!--listend-->
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-sh" data-lang="sh">&lt;span style="display:flex;">&lt;span>go test -cpu&lt;span style="color:#f92672">=&lt;/span>1,2,4,8,16,32 -bench Cgo
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-text" data-lang="text">&lt;span style="display:flex;">&lt;span>goos: linux
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>goarch: amd64
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>pkg: github.com/shanemhansen/cgobench
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>cpu: 12th Gen Intel(R) Core(TM) i7-12700H
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkCgoCall 28711474 38.93 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkCgoCall-2 60680826 20.30 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkCgoCall-4 100000000 10.46 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkCgoCall-8 198091461 6.134 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkCgoCall-16 248427465 4.949 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkCgoCall-32 256506208 4.328 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>PASS
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>ok github.com/shanemhansen/cgobench 8.609s
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Now I want to use Go&amp;rsquo;s great profiling tools to get a better picture of performance at higher core counts. I&amp;rsquo;m a fan of the pprof web view,
+which tells us that &lt;code>runtime.(*timeHistorgram).record&lt;/code> and &lt;code>runtime.casgstatus&lt;/code> are taking lots of time. This
+tracks with &lt;a href="https://groups.google.com/g/golang-dev/c/XSkrp1_FdiU?pli=1">Ian Lance Taylor&amp;rsquo;s observations&lt;/a>. Interestingly he doesn&amp;rsquo;t expect these operations to be contended,
+so there&amp;rsquo;s potential for improving performance. Personally I spent a bunch of time staring at a hot &lt;code>test %al,(%rax)&lt;/code>
+instruction that I frankly don&amp;rsquo;t understand.&lt;/p>
+&lt;p>Running the test and collecting results:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-sh" data-lang="sh">&lt;span style="display:flex;">&lt;span>go test -c
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>./cgobench.test -test.cpuprofile&lt;span style="color:#f92672">=&lt;/span>c.out -test.cpu&lt;span style="color:#f92672">=&lt;/span>&lt;span style="color:#ae81ff">16&lt;/span> -test.bench Cgo
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>go tool pprof -png cgobench.test c.out &amp;gt; cpu.png
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-text" data-lang="text">&lt;span style="display:flex;">&lt;span>goos: linux
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>goarch: amd64
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>pkg: github.com/shanemhansen/cgobench
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>cpu: 12th Gen Intel(R) Core(TM) i7-12700H
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkCgoCall-16 235322289 4.955 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>PASS
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Note the 2 large boxes near the bottom:&lt;/p>
+&lt;figure class="left" >
+&lt;img src="https://shane.ai/cpu.png" style="width:50%" />
+&lt;/figure>
+&lt;p>I also use linux &lt;code>perf&lt;/code> quite frequently. It does a good job of being able to profile cross language stuff for compiled languages.
+A quick snapshot of (one of) the hot instructions in question in question from perf:&lt;/p>
+&lt;figure class="left" >
+&lt;img src="https://shane.ai/casgstatus.png" />
+&lt;/figure>
+&lt;p>Before we put it all together I&amp;rsquo;ll add one final piece of data in to help us get perspective. Here&amp;rsquo;s a carefully crafted JSON decoding benchmark that just parses an integer. It&amp;rsquo;s
+written using &lt;code>json.NewDecoder&lt;/code> because just &lt;code>json.Unmarshal&lt;/code> allocates too much. What you&amp;rsquo;ll see below is that a Cgo call is 20% cheaper than a trivial JSON parse using the standard
+library in both single threaded and parallel tests.&lt;/p>
+&lt;p>&lt;code>bench_test.go&lt;/code>&lt;/p>
+&lt;p>&lt;a id="code-snippet--BenchmarkJSON">&lt;/a>&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-go" data-lang="go">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">func&lt;/span> &lt;span style="color:#a6e22e">BenchmarkJSONCall&lt;/span>(&lt;span style="color:#a6e22e">b&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">B&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">msg&lt;/span> &lt;span style="color:#f92672">:=&lt;/span> &lt;span style="color:#e6db74">`1`&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">b&lt;/span>.&lt;span style="color:#a6e22e">RunParallel&lt;/span>(&lt;span style="color:#66d9ef">func&lt;/span>(&lt;span style="color:#a6e22e">pb&lt;/span> &lt;span style="color:#f92672">*&lt;/span>&lt;span style="color:#a6e22e">testing&lt;/span>.&lt;span style="color:#a6e22e">PB&lt;/span>) {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">var&lt;/span> &lt;span style="color:#a6e22e">dst&lt;/span> &lt;span style="color:#66d9ef">int&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">r&lt;/span> &lt;span style="color:#f92672">:=&lt;/span> &lt;span style="color:#a6e22e">strings&lt;/span>.&lt;span style="color:#a6e22e">NewReader&lt;/span>(&lt;span style="color:#a6e22e">msg&lt;/span>)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">dec&lt;/span> &lt;span style="color:#f92672">:=&lt;/span> &lt;span style="color:#a6e22e">json&lt;/span>.&lt;span style="color:#a6e22e">NewDecoder&lt;/span>(&lt;span style="color:#a6e22e">r&lt;/span>)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">for&lt;/span> &lt;span style="color:#a6e22e">pb&lt;/span>.&lt;span style="color:#a6e22e">Next&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">r&lt;/span>.&lt;span style="color:#a6e22e">Seek&lt;/span>(&lt;span style="color:#ae81ff">0&lt;/span>, &lt;span style="color:#a6e22e">io&lt;/span>.&lt;span style="color:#a6e22e">SeekStart&lt;/span>)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">if&lt;/span> &lt;span style="color:#a6e22e">err&lt;/span> &lt;span style="color:#f92672">:=&lt;/span> &lt;span style="color:#a6e22e">dec&lt;/span>.&lt;span style="color:#a6e22e">Decode&lt;/span>(&lt;span style="color:#f92672">&amp;amp;&lt;/span>&lt;span style="color:#a6e22e">dst&lt;/span>); &lt;span style="color:#a6e22e">err&lt;/span> &lt;span style="color:#f92672">!=&lt;/span> &lt;span style="color:#66d9ef">nil&lt;/span> {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> panic(&lt;span style="color:#a6e22e">err&lt;/span>)
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> })
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-sh" data-lang="sh">&lt;span style="display:flex;">&lt;span>go test -cpu&lt;span style="color:#f92672">=&lt;/span>1,16 -bench JSON
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-text" data-lang="text">&lt;span style="display:flex;">&lt;span>goos: linux
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>goarch: amd64
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>pkg: github.com/shanemhansen/cgobench
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>cpu: 12th Gen Intel(R) Core(TM) i7-12700H
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkJSONCall 21399691 52.79 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>BenchmarkJSONCall-16 217874599 5.471 ns/op
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>PASS
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>ok github.com/shanemhansen/cgobench 2.942s
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h2 id="conclusions">Conclusions&lt;/h2>
+&lt;p>So at this point we&amp;rsquo;ve measured performance overhead of Cgo, at least
+in terms of wall clock time (note that we haven&amp;rsquo;t looked at memory/thread count/battery usage/etc). We know that the overhead is on the order of 2 mutex operations and that it does
+scale with number of cores up to around 16. We&amp;rsquo;ve also seen that with 16 cores we can do around 4ns/op or close to 250 million Cgo ops/s. So if I was looking at using Cgo in 2023 I&amp;rsquo;d definitely use
+it outside of very hot loops. There&amp;rsquo;s many reasons I wouldn&amp;rsquo;t use Cgo in 2023 (see disclaimer), but performance is unlikely to be one of them.&lt;/p>
+&lt;p>I&amp;rsquo;ll end with this little &amp;ldquo;latency numbers every Cgo programmer should know&amp;rdquo; chart:&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>Go/Cgo latency&lt;/th>
+&lt;th>&lt;/th>
+&lt;th>&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>Benchmark Name&lt;/td>
+&lt;td>1 core&lt;/td>
+&lt;td>16 cores&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Inlined Empty func&lt;/td>
+&lt;td>0.271 ns&lt;/td>
+&lt;td>0.02489 ns&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Empty func&lt;/td>
+&lt;td>1.5s ns&lt;/td>
+&lt;td>0.135 ns&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>&lt;code>cgo&lt;/code>&lt;/td>
+&lt;td>&lt;code>40 ns&lt;/code>&lt;/td>
+&lt;td>&lt;code>4.281 ns&lt;/code>&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>encoding/json int parse&lt;/td>
+&lt;td>52.89 ns&lt;/td>
+&lt;td>5.518 ns&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table></content></item><item><title>Threads and Goroutines</title><link>https://shane.ai/posts/threads-and-goroutines/</link><pubDate>Mon, 12 Jun 2023 15:33:25 -0700</pubDate><guid>https://shane.ai/posts/threads-and-goroutines/</guid><description>So after several years of reading oversimplified and flat out incorrect comments about threads and fibers/goroutines/async/etc and fighting this reaction:
 I&amp;rsquo;ve decided to write my own still-over-simplified all in one guide to the difference between a couple popular threads and fiber implementations. In order to keep this a blog post and not a novel I&amp;rsquo;m just going to focus on linux threads, go goroutines, and rust threads.
 tl;dr - Rust threads on linux use 8kb of memory, Goroutines use 2kb.</description><content>&lt;p>So after several years of reading oversimplified and flat out incorrect comments about threads and fibers/goroutines/async/etc and fighting this reaction:&lt;/p>
 &lt;p>&lt;img src="https://imgs.xkcd.com/comics/duty_calls.png" alt="Someone on the internet is wrong">&lt;/p>
