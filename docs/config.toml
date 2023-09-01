@@ -26,3 +26,6 @@ path = 'github.com/panr/hugo-theme-terminal'
         identifier = "about"
         name = "About"
         url = "/about"
+[markup.goldmark.renderer]
+unsafe = true
+  
