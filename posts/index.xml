@@ -1,4 +1,490 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on Words from Shane</title><link>https://shane.ai/posts/</link><description>Recent content in Posts on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Fri, 01 Sep 2023 14:42:00 -0700</lastBuildDate><atom:link href="https://shane.ai/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>CGO Performance In Go 1.21</title><link>https://shane.ai/posts/cgo-performance-in-go1.21/</link><pubDate>Fri, 01 Sep 2023 14:42:00 -0700</pubDate><guid>https://shane.ai/posts/cgo-performance-in-go1.21/</guid><description>Tl;Dr Cgo calls take about 40ns, about the same time encoding/json takes to parse a single digit integer. On my 20 core machine Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on Words from Shane</title><link>https://shane.ai/posts/</link><description>Recent content in Posts on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Tue, 26 Sep 2023 13:34:00 -0700</lastBuildDate><atom:link href="https://shane.ai/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>Some notes on javascript jit and deopt</title><link>https://shane.ai/posts/notes-on-javascript-jit-deopt/</link><pubDate>Tue, 26 Sep 2023 13:34:00 -0700</pubDate><guid>https://shane.ai/posts/notes-on-javascript-jit-deopt/</guid><description>Recently I read a fantastic article walking through jit optimizations and how changes to source code could impact those: Side effecting a deopt
+As I shared it with folks, a few of them had some questions about low level optmizations in general and I wrote this as a little explainer for people who are interested in learning more about how javascript runtimes can model/compile/jit/execute their js code.
+My goal is that by the time we&amp;rsquo;re done the reader understands a bit more about:</description><content>&lt;p>Recently I read a fantastic article walking through jit optimizations
+and how changes to source code could impact those: &lt;a href="https://www.recompiled.dev/blog/deopt/">Side effecting a deopt&lt;/a>&lt;/p>
+&lt;p>As I shared it with folks, a few of them had some questions about low level optmizations in general and
+I wrote this as a little explainer for people who are interested in learning more about how
+javascript runtimes can model/compile/jit/execute their js code.&lt;/p>
+&lt;p>My goal is that by the time we&amp;rsquo;re done the reader understands a bit more about:&lt;/p>
+&lt;ol>
+&lt;li>How their computer can model arbitrary property/value pairs (&lt;code>Objects&lt;/code>)&lt;/li>
+&lt;li>How their computer can model &lt;code>Objects&lt;/code> with fixed properties (what many languages would call a struct, or even a class)&lt;/li>
+&lt;li>Some basics about how a javascript engines can observe how a value runs through the system&lt;/li>
+&lt;/ol>
+&lt;h2 id="understanding-hexadecimal-notation-and-ram">Understanding hexadecimal notation and RAM&lt;/h2>
+&lt;p>Many programs that deal with memory addresses use hexadecimal. So instead of saying &amp;ldquo;20th byte&amp;rdquo; they say &amp;ldquo;0x14&amp;rdquo;. Base 16 just adds 6 extra &amp;ldquo;digits&amp;rdquo; and uses
+a-f to represent them. So here&amp;rsquo;s a few numbers in hex and base 10. We often write a prefix &lt;code>0x&lt;/code> for hex numbers to let you know they aren&amp;rsquo;t base 10.&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>base 10&lt;/th>
+&lt;th>hex&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>1&lt;/td>
+&lt;td>1&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>10&lt;/td>
+&lt;td>a&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>11&lt;/td>
+&lt;td>b&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>16&lt;/td>
+&lt;td>10&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>17&lt;/td>
+&lt;td>11&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>20&lt;/td>
+&lt;td>14&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;p>For those who like a more theoretical description: the idea is that any number we work with like &lt;code>123&lt;/code> really means: &lt;code>1*10^2+2*20^1+3*10^0&lt;/code>. If you look at our 0x14 example that means:
+&lt;code>0x14 = 1*16^1+4*16^0 == 20&lt;/code>.&lt;/p>
+&lt;p>About the only time I mention hex is when discussing the output of optimization tools and it&amp;rsquo;s really simple
+because we&amp;rsquo;ll deal with things like &lt;code>0x2&lt;/code> which is 2. And &lt;code>0xc&lt;/code> which is 13.&lt;/p>
+&lt;h2 id="disclaimers">Disclaimers:&lt;/h2>
+&lt;p>Also the real world calls RAM indexes pointers. I&amp;rsquo;m
+hopeful that using RAM index as if RAM is an array of bytes is clearer for the target audience. But feel free
+to translate statements like &lt;code>RAM[foo]&lt;/code> to &lt;code>*foo&lt;/code>. Similarly I will talk alot about records that are packed,
+the normal industry nomenclature would probably be &lt;code>C struct&lt;/code> (with some caveats around packing, padding, field ordering, etc). As one
+last thing: I&amp;rsquo;m pretending in this example that our computers have byte sized words and that ASCII is great because
+32bit/64bit and utf8/utf16 don&amp;rsquo;t add anything to this post and we&amp;rsquo;d have to count in multiples of 4 or 8. Finally
+my hashtables aren&amp;rsquo;t fast at all.&lt;/p>
+&lt;h2 id="more-notation-how-computers-address-ram">More notation: how computers &lt;strong>address&lt;/strong> RAM&lt;/h2>
+&lt;p>If we want to model some sort of record on the computer, such as a person who has a numeric id and a numeric age, we have to come up with a way of
+representing those objects in memory and referring to them. Most of the readers here understand what I mean when I say something like &lt;code>let Person = {id:0, age:24}&lt;/code>, but computers don&amp;rsquo;t.
+The simplest way to represent a person &amp;ldquo;object&amp;rdquo; then is as 2 bytes next to each other. The first one is their id. The second one is their age. Let&amp;rsquo;s write out
+an array of 2 persons in RAM:&lt;/p>
+&lt;p>&lt;code>let persons = [{id:1, age:24}, {id:2, age:28}]&lt;/code>&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>RAM index&lt;/th>
+&lt;th>0&lt;/th>
+&lt;th>1&lt;/th>
+&lt;th>2&lt;/th>
+&lt;th>3&lt;/th>
+&lt;th>4&lt;/th>
+&lt;th>5&lt;/th>
+&lt;th>6&lt;/th>
+&lt;th>7&lt;/th>
+&lt;th>8&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>RAM value&lt;/td>
+&lt;td>1&lt;/td>
+&lt;td>24&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>28&lt;/td>
+&lt;td>0&lt;/td>
+&lt;td>0&lt;/td>
+&lt;td>0&lt;/td>
+&lt;td>0&lt;/td>
+&lt;td>0&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>Field name&lt;/td>
+&lt;td>id&lt;/td>
+&lt;td>age&lt;/td>
+&lt;td>id&lt;/td>
+&lt;td>age&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;p>So now if you tell a computer where the object starts (via pointer or RAM index), it knows the id is at offset 0, and the age is at offset 1. It knows the size of a person record (2 bytes).
+If it needs to operate on those values (LOAD/STORE/MOV low level assembly instructions)
+it can directly write machine code that uses those offsets. Let&amp;rsquo;s write some psuedocode for returning the age of the 2nd person:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-js" data-lang="js">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">persons_array&lt;/span> &lt;span style="color:#f92672">=&lt;/span> ;&lt;span style="color:#75715e">// some number that is an index into RAM
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">size_of_person&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">2&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">age_offset&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">1&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">person_2_age&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">RAM&lt;/span>[
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">persons_array&lt;/span> &lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#75715e">// where the array starts
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#a6e22e">size_of_person&lt;/span> &lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#75715e">// skip ahead 1
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span> &lt;span style="color:#a6e22e">age_offset&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>]; &lt;span style="color:#75715e">// age is 2nd value
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// or equivalantly: one addition. one ram lookup.
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#a6e22e">person_2_age&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">RAM&lt;/span>[&lt;span style="color:#a6e22e">persons_array&lt;/span>&lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#ae81ff">3&lt;/span>];
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Let&amp;rsquo;s show one more example for strings. Unfortunately strings are variable length. So if you have a record like &lt;code>let person = [{id:&amp;quot;id2&amp;quot;, age:29}, {id:&amp;quot;id10&amp;quot;, age:40}]&lt;/code> those
+strings can&amp;rsquo;t be packed into the same orderly layout as above where each field starts at a fixed offset. We typically store the strings somewhere else and store the RAM index of that location in the person record. Let&amp;rsquo;s draw that out. We because these
+strings are variable length we use a special marker character called null or &lt;code>\0&lt;/code> to indicate end of string. This is how the c programming language represents strings historically.&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>RAM index&lt;/th>
+&lt;th>0&lt;/th>
+&lt;th>1&lt;/th>
+&lt;th>2&lt;/th>
+&lt;th>3&lt;/th>
+&lt;th>4&lt;/th>
+&lt;th>5&lt;/th>
+&lt;th>6&lt;/th>
+&lt;th>7&lt;/th>
+&lt;th>8&lt;/th>
+&lt;th>&lt;/th>
+&lt;th>&lt;/th>
+&lt;th>&lt;/th>
+&lt;th>&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>RAM value&lt;/td>
+&lt;td>4&lt;/td>
+&lt;td>29&lt;/td>
+&lt;td>8&lt;/td>
+&lt;td>30&lt;/td>
+&lt;td>i&lt;/td>
+&lt;td>d&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>i&lt;/td>
+&lt;td>d&lt;/td>
+&lt;td>1&lt;/td>
+&lt;td>0&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>field name&lt;/td>
+&lt;td>id&lt;/td>
+&lt;td>age&lt;/td>
+&lt;td>id&lt;/td>
+&lt;td>age&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;p>The big thing to notice here is the RAM value for the id. 4 and 8. Those correspond to RAM index 4 and 8. Saying &amp;ldquo;here&amp;rsquo;s a fixed sized number who&amp;rsquo;s value is where you can find the variable
+sized data&amp;rdquo;. So now you have enough background to understand a really basic record/object type. This is an idealized example, in the real world the actual layout can be more complicated but
+for our purposes today this is a good enough mental model of &amp;ldquo;how to layout an object in memory for maximum speed&amp;rdquo;.&lt;/p>
+&lt;h2 id="hashtable-basics">Hashtable basics&lt;/h2>
+&lt;p>Now the problem is that the above techniques do not allow us to deal with arbitrary field names. We can&amp;rsquo;t add fields later on or that would mess up all the calculations like &amp;ldquo;load the 2nd byte of the
+record to get the age&amp;rdquo;. Javascript &lt;code>Objects&lt;/code> allow any number of property/value pairs (in the context of hashtables properties are called keys) and people need to quickly look up a key when they write &lt;code>x.foo&lt;/code>. Let&amp;rsquo;s sketch a couple ways people could store those in memory.
+The simplest method is to put all the values right next to each other one after another and use &lt;code>\0&lt;/code> to separate them.&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>RAM index&lt;/th>
+&lt;th>0&lt;/th>
+&lt;th>1&lt;/th>
+&lt;th>2&lt;/th>
+&lt;th>3&lt;/th>
+&lt;th>4&lt;/th>
+&lt;th>5&lt;/th>
+&lt;th>6&lt;/th>
+&lt;th>7&lt;/th>
+&lt;th>8&lt;/th>
+&lt;th>9&lt;/th>
+&lt;th>10&lt;/th>
+&lt;th>11&lt;/th>
+&lt;th>12&lt;/th>
+&lt;th>13&lt;/th>
+&lt;th>14&lt;/th>
+&lt;th>15&lt;/th>
+&lt;th>16&lt;/th>
+&lt;th>17&lt;/th>
+&lt;th>18&lt;/th>
+&lt;th>19&lt;/th>
+&lt;th>20&lt;/th>
+&lt;th>21&lt;/th>
+&lt;th>22&lt;/th>
+&lt;th>23&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>RAM value&lt;/td>
+&lt;td>k&lt;/td>
+&lt;td>e&lt;/td>
+&lt;td>y&lt;/td>
+&lt;td>1&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>v&lt;/td>
+&lt;td>a&lt;/td>
+&lt;td>l&lt;/td>
+&lt;td>u&lt;/td>
+&lt;td>e&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>k&lt;/td>
+&lt;td>e&lt;/td>
+&lt;td>y&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>v&lt;/td>
+&lt;td>a&lt;/td>
+&lt;td>l&lt;/td>
+&lt;td>u&lt;/td>
+&lt;td>e&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;p>So if we stored data this way we could pretty easily write some psuedocode for looking up a key/value pair. Just compare the current key in memory with the
+property name you are looking for byte by byte. If it doesn&amp;rsquo;t match, skip the next value until you find a null, and start over. Unfortunately this would be slow because
+the farther along your key is, the longer you have to search. So we have something called hashtables. The basic idea of a hashtable is we have some function to convert our
+keys to numbers. Then we convert those numbers to a bucket index. So I might have 10 buckets and when I store &amp;ldquo;foo&amp;rdquo; I run a function which says hash(&amp;ldquo;foo&amp;rdquo;) = some random number like 12313213
+and then I convert that to a bucket index by saying &lt;code>12313213%10 = 3&lt;/code>. Then in bucket number 3 I store something like: &lt;code>foo\0value\0&lt;/code>. The great thing about this
+is that as long as there are no collisions (2 different keys that go to the same bucket) I can find any property without looking at all the data. The overhead for finding a value in a hashtable
+without collisions just depends on how long it takes to run &lt;code>hash(key)&lt;/code> and not on the number of keys in the hashtable. I can handle collisions (multiple properties
+ending up in the same bucket) by just using the strategy listed above and smashing key value pairs together. Without going into too much detail, real world hashtables have better strategies for minimizing collisions by detecting
+when they are close to full and resizing. Sometimes instead of a long chain of key/value pairs they have another hashtable, or a tree. But for today let&amp;rsquo;s try and show an example of how a 3 key value pairs might be represented in a simple 2 bucket hashtable. The example record is: &lt;code>let person = {name: &amp;quot;bob&amp;quot;, id: &amp;quot;id3&amp;quot;, age:&amp;quot;21&amp;quot;}&lt;/code> I&amp;rsquo;m going to
+draw this as a graph and then also as a linear array of bytes if we just append key/value pairs when there&amp;rsquo;s a collision.&lt;/p>
+&lt;figure class="left" >
+&lt;img src="https://shane.ai/ox-hugo/hashtable.png" />
+&lt;/figure>
+&lt;p>Here&amp;rsquo;s a table of numbers for representing the same thing. We have a person value which consists of a bucket count and a buckets RAM index. The bucket&amp;rsquo;s RAM index
+is where the bucket list starts. Next up we have the 2 buckets. In the real world all of this wouldn&amp;rsquo;t be packed so close. Which is important for adding more buckets
+and more key/values. Our first bucket points to index 4, which is where they key/valuy pair &amp;ldquo;name:bob&amp;rdquo; is stored, etc.&lt;/p>
+&lt;table>
+&lt;thead>
+&lt;tr>
+&lt;th>RAM index&lt;/th>
+&lt;th>0&lt;/th>
+&lt;th>1&lt;/th>
+&lt;th>2&lt;/th>
+&lt;th>3&lt;/th>
+&lt;th>4&lt;/th>
+&lt;th>5&lt;/th>
+&lt;th>6&lt;/th>
+&lt;th>7&lt;/th>
+&lt;th>8&lt;/th>
+&lt;th>8&lt;/th>
+&lt;th>9&lt;/th>
+&lt;th>10&lt;/th>
+&lt;th>11&lt;/th>
+&lt;th>12&lt;/th>
+&lt;th>13&lt;/th>
+&lt;th>14&lt;/th>
+&lt;th>15&lt;/th>
+&lt;th>16&lt;/th>
+&lt;th>17&lt;/th>
+&lt;th>18&lt;/th>
+&lt;th>19&lt;/th>
+&lt;th>20&lt;/th>
+&lt;th>21&lt;/th>
+&lt;th>22&lt;/th>
+&lt;th>23&lt;/th>
+&lt;th>24&lt;/th>
+&lt;th>25&lt;/th>
+&lt;/tr>
+&lt;/thead>
+&lt;tbody>
+&lt;tr>
+&lt;td>RAM value&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>4&lt;/td>
+&lt;td>17&lt;/td>
+&lt;td>n&lt;/td>
+&lt;td>a&lt;/td>
+&lt;td>m&lt;/td>
+&lt;td>e&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>b&lt;/td>
+&lt;td>o&lt;/td>
+&lt;td>b&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>a&lt;/td>
+&lt;td>g&lt;/td>
+&lt;td>e&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>2&lt;/td>
+&lt;td>1&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>i&lt;/td>
+&lt;td>d&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;td>i&lt;/td>
+&lt;td>d&lt;/td>
+&lt;td>3&lt;/td>
+&lt;td>\0&lt;/td>
+&lt;/tr>
+&lt;tr>
+&lt;td>field&lt;/td>
+&lt;td>bucketCount&lt;/td>
+&lt;td>bucketRamIndex&lt;/td>
+&lt;td>bucket[0]&lt;/td>
+&lt;td>bucket[1]&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;td>&lt;/td>
+&lt;/tr>
+&lt;/tbody>
+&lt;/table>
+&lt;p>So this should give you a basic idea that looking up a hashtable key stays fast as you add more items, as long as you don&amp;rsquo;t have alot more items than buckets. But now instead of the
+cpu being able to translate something like &lt;code>person.name&lt;/code> into a fixed offset from person, it must instead do the following psuedocode.&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-js" data-lang="js">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// imaginary ram already defined
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">RAM&lt;/span> &lt;span style="color:#f92672">=&lt;/span> [];
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// RAM index where person is located.
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">person&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">0&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// we&amp;#39;ve defined it to be the 1st element
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">bucketCountOffset&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">0&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">//we&amp;#39;ve deinfed it to be the 2nd element
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">bucketRamIndexOffset&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">1&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// the size of the bucket would have to be stored
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">bucketCount&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">RAM&lt;/span>[&lt;span style="color:#a6e22e">person&lt;/span>&lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#a6e22e">bucketCountOffset&lt;/span>]
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// hash is defined elsewhere. It takes a string and returns an integer.
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">bucketNumber&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">hash&lt;/span>(&lt;span style="color:#e6db74">&amp;#34;person&amp;#34;&lt;/span>)&lt;span style="color:#f92672">%&lt;/span>&lt;span style="color:#a6e22e">bucketCount&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">startOfbuckets&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">RAM&lt;/span>[&lt;span style="color:#a6e22e">person&lt;/span>&lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#a6e22e">bucketRamIndexOffset&lt;/span>]
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">bucketRAMIndex&lt;/span>&lt;span style="color:#f92672">=&lt;/span>&lt;span style="color:#a6e22e">RAM&lt;/span>[&lt;span style="color:#a6e22e">startOfBuckets&lt;/span>&lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#a6e22e">bucketNumber&lt;/span>]
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// search_bucket searches a chain of &amp;#34;key\0value\0key\0value\0&amp;#34; pairs.
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">&lt;/span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">age&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#a6e22e">search_bucket&lt;/span>(&lt;span style="color:#a6e22e">bucketRAMINDEX&lt;/span>, &lt;span style="color:#e6db74">&amp;#34;name&amp;#34;&lt;/span>);
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Note that this requires us to look at several bytes in the property name, do some math, and load several values from RAM just to get to where age is stored. Going into the latency
+of all these operations is beyond the scope here, but it&amp;rsquo;s safe to say that two things that often make code slow are:&lt;/p>
+&lt;ol>
+&lt;li>Searching for values without any ordering/index&lt;/li>
+&lt;li>A bunch of chained RAM lookups such as the 3 RAM lookups we had to do, one of which was chained (often referred to as pointer chasing).&lt;/li>
+&lt;/ol>
+&lt;h2 id="optimizing-a-hashtable">Optimizing a hashtable&lt;/h2>
+&lt;p>So now the optimizations javascript runtimes want to do start to make sense. Any js &lt;code>Object&lt;/code> &lt;strong>could&lt;/strong> be a full hashtable, but since so often
+js Objects have fixed property names, the runtime would prefer to represent them similar to the 2 byte packed format we used above for person. In fact
+it turns out that this happens pretty often. After all our example above where we store a list of objects with the same structure comes up pretty often.&lt;/p>
+&lt;p>Javascript runtimes detect these patterns and optimize the storage layout and data access. It&amp;rsquo;s alot harder than you&amp;rsquo;d expect because javascript is such
+a dynamic language. So not only must they make the optimizations based on assumptions like &amp;ldquo;nobody will add keys to this object&amp;rdquo;, but they must keep track
+of when those assumptions are violated and fall back to regular hashtables or unoptimized code. They have to do this entire dance on a time/memory budget because
+afterall they are trying to speed up your code so if their transformations and untransformations aren&amp;rsquo;t fast enough, they&amp;rsquo;ve failed at their purpose.&lt;/p>
+&lt;p>So a good mental model is &amp;ldquo;javascript runtimes look at data access and speculatively optimize the storage, while maintaining a list of assumptions and dependencies that may
+invalidate their assumptions. They might have to deoptimize/reoptimize if one of those assumptions changes&amp;rdquo;.&lt;/p>
+&lt;h2 id="a-simple-example-to-optimize">A simple example to optimize&lt;/h2>
+&lt;p>Let&amp;rsquo;s look at a javascript function from the blog:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-js" data-lang="js">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">x&lt;/span> &lt;span style="color:#f92672">=&lt;/span> { &lt;span style="color:#a6e22e">foo&lt;/span>&lt;span style="color:#f92672">:&lt;/span> &lt;span style="color:#ae81ff">1&lt;/span> };
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">function&lt;/span> &lt;span style="color:#a6e22e">load&lt;/span>() {
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#66d9ef">return&lt;/span> &lt;span style="color:#a6e22e">x&lt;/span>.&lt;span style="color:#a6e22e">foo&lt;/span>;
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">console&lt;/span>.&lt;span style="color:#a6e22e">log&lt;/span>(&lt;span style="color:#a6e22e">load&lt;/span>());
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Now just by looking at this function it&amp;rsquo;s pretty easy to see that in the absence of &amp;ldquo;funny business&amp;rdquo;
+(certain javascript dynamic features that can cause weird things to happen) it seems like our
+entire program could easily be reduced to &lt;code>console.log(1)&lt;/code>. Let&amp;rsquo;s trace through how a js engine
+might execute each version of the program.&lt;/p>
+&lt;h3 id="execution-trace">Execution trace&lt;/h3>
+&lt;ol>
+&lt;li>Create a new string value &lt;code>&amp;quot;foo&amp;quot;&lt;/code>&lt;/li>
+&lt;li>Create a new number value &lt;code>1&lt;/code>&lt;/li>
+&lt;li>Create a new Object and store the above key/value pair in it (which involves hashing and finding a bucket)&lt;/li>
+&lt;li>Call the &lt;code>load&lt;/code> function.&lt;/li>
+&lt;li>Find a variable named &lt;code>x&lt;/code> (note that because it&amp;rsquo;s not defined in the current function sometimes we might actually does have to &amp;ldquo;look farther&amp;rdquo; to notice &lt;code>x&lt;/code> is a global variable).&lt;/li>
+&lt;li>Lookup the value of the &lt;code>foo&lt;/code> property on &lt;code>x&lt;/code>. This could involve hashing the string &lt;code>&amp;quot;foo&amp;quot;&lt;/code> to some number to get a bucket to seach for a value.&lt;/li>
+&lt;li>Return that value &lt;code>1&lt;/code>&lt;/li>
+&lt;li>Call &lt;code>console.log()&lt;/code> with the value &lt;code>1&lt;/code>&lt;/li>
+&lt;/ol>
+&lt;p>I&amp;rsquo;m intentionally trying to omit some boring details while giving you an idea of the work the CPU is doing. What&amp;rsquo;s important if we&amp;rsquo;re trying to optimize the performance of &lt;code>load&lt;/code>
+is to notice that we&amp;rsquo;re probably doing alot of work hashing the foo key to find where &lt;code>1&lt;/code> is stored. But we&amp;rsquo;re smart and we looked at the code and decided that we can replace all the above steps
+with just the last one : call &lt;code>console.log()&lt;/code> with the value &lt;code>1&lt;/code>. And that is why in the referenced blog post the author points out that the runtime debug information printed out:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-sh" data-lang="sh">&lt;span style="display:flex;">&lt;span>0x280008150 &lt;span style="color:#ae81ff">130&lt;/span> d2800040 movz x0, &lt;span style="color:#75715e">#0x2&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>// The value is 0x2, and not 0x1 because it&lt;span style="color:#960050;background-color:#1e0010">&amp;#39;&lt;/span>s been tagged.
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Don&amp;rsquo;t worry about anything but 0x2. That statement is essentially the proof that the optimizer reduced our function call and our object property lookup
+down to just the value &lt;code>1&lt;/code>. Javascript uses something called tagged numbers so you&amp;rsquo;ll have to trust me that in this case 2 on the computer means one in javascript. It&amp;rsquo;s part
+of how javascript distinguishes between a number and an &lt;code>Object&lt;/code> at a certain RAM index.&lt;/p>
+&lt;p>Let&amp;rsquo;s also look into what assumptions/observations the runtime made in order to make the assumption that
+&lt;code>console.log(load())&lt;/code> is &lt;code>console.log(1)&lt;/code>. This is not an exhaustive list:&lt;/p>
+&lt;ol>
+&lt;li>We have to assume that &lt;code>load()&lt;/code> invokes the load function defined above, it can&amp;rsquo;t have been overridden.&lt;/li>
+&lt;li>We have to assume that nothing has changed x.foo (the const means x is always the same object, not that the object is immutable)&lt;/li>
+&lt;li>We have to assume nobody has messed with the object&amp;rsquo;s prototype using &lt;code>x.__defineGetter__(&amp;quot;foo&amp;quot;, function() { return 2})&lt;/code>&lt;/li>
+&lt;/ol>
+&lt;p>And there are some more dependencies that are an artifact of how the runtime implements optimization.&lt;/p>
+&lt;h3 id="causing-a-deopt-by-changing-something-that-looked-constant">Causing a deopt by changing something that looked constant&lt;/h3>
+&lt;p>So back to reading &amp;ldquo;side effecting a deopt&amp;rdquo;: Now we understand why &lt;code>x.foo=5&lt;/code> causes deoptimization/reoptimization.
+What&amp;rsquo;s fascinating is that in their examples v8 didn&amp;rsquo;t fall back to a completely unoptimized path. Instead
+of assuming load always returned 1, is fell back to &lt;code>LoadTaggedField(0xc, decompressed)&lt;/code>. I&amp;rsquo;m going
+to be a little lazy and not dive deep into the implementation here, and instead assume that means
+the code is essentially doing is analogous to what we&amp;rsquo;ve described as modeling the data for x as record
+who&amp;rsquo;s with one integer field. Let&amp;rsquo;s write a human readable description of what the runtime has now optimized our function to.
+I&amp;rsquo;ll include an offset called foo_offset just like we did above
+for person and age. I&amp;rsquo;m also
+going to invent a new function. Typically in C this is called &lt;code>&amp;amp;&lt;/code> for &amp;ldquo;address of&amp;rdquo; (or RAM index)
+I&amp;rsquo;ll call it ram_index().
+So a psuedocode version of the new optimized code is below: we essentially load the foo property
+from a fixed offset of the RAM index where x is stored.&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-js" data-lang="js">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">let&lt;/span> &lt;span style="color:#a6e22e">foo_offset&lt;/span>&lt;span style="color:#f92672">=&lt;/span>&lt;span style="color:#ae81ff">0&lt;/span>
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">console&lt;/span>.&lt;span style="color:#a6e22e">log&lt;/span>(&lt;span style="color:#a6e22e">RAM&lt;/span>[&lt;span style="color:#a6e22e">ram_index&lt;/span>(&lt;span style="color:#a6e22e">foo&lt;/span>)&lt;span style="color:#f92672">+&lt;/span>&lt;span style="color:#a6e22e">foo_offset&lt;/span>]);
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// For the c folks
+&lt;/span>&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#75715e">// console.log(*(&amp;amp;(foo+foo_offset)))
+&lt;/span>&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h3 id="expando">Expando&lt;/h3>
+&lt;p>We can now pretty easily talk about the effects of taking our optimized value x and adding new properties:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-js" data-lang="js">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">x&lt;/span>.&lt;span style="color:#a6e22e">__expando&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">2&lt;/span>;
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>This causes a deoptimization because the compiler went through all this trouble to figure out that
+x had just one property that was a number. Now it has 2. So it has to decide whether it wants to
+create a new optimized storage layout for x with just 2 numbers squished together or whether it
+should hold off on optimizing. There&amp;rsquo;s no one right answer, but clearly the previous work was invalidated.&lt;/p>
+&lt;h3 id="spooky-action-at-a-distance">Spooky action at a distance&lt;/h3>
+&lt;p>The last example in the blog post is a fun one. They took our existing optimized code and added a new variable:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;">&lt;code class="language-js" data-lang="js">&lt;span style="display:flex;">&lt;span>&lt;span style="color:#66d9ef">const&lt;/span> &lt;span style="color:#a6e22e">y&lt;/span> &lt;span style="color:#f92672">=&lt;/span> {&lt;span style="color:#a6e22e">foo&lt;/span>&lt;span style="color:#f92672">:&lt;/span>&lt;span style="color:#ae81ff">1&lt;/span>};
+&lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>&lt;span style="color:#a6e22e">y&lt;/span>.&lt;span style="color:#a6e22e">__expando&lt;/span> &lt;span style="color:#f92672">=&lt;/span> &lt;span style="color:#ae81ff">4&lt;/span>;
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>What&amp;rsquo;s surprising is this code causes x to become deoptimized! There&amp;rsquo;s no fundamental reason
+why this has to be true but the short answer is that when the runtime optimizes these variables
+it essentially has to store a schema (or hidden class) somewhere that says &amp;ldquo;foo is an integer property at at offset 0&amp;rdquo;.&lt;/p>
+&lt;p>When the runtime sees &lt;code>y={foo:1}&lt;/code> is does some deduplication so x and y both share the same hidden class/schema. There&amp;rsquo;s now a dependency here
+which is that&amp;hellip;. x and y have the same properties.&lt;/p>
+&lt;p>When we add a new property to y, we break that assumption and x and y can no longer share the same hidden class. There
+are lots of choices about what the runtime could do, and sorting that out results in another
+round of deoptimization/reoptimization.&lt;/p>
+&lt;p>Let&amp;rsquo;s draw a dependency graph showing the hidden class before/after.&lt;/p>
+&lt;figure class="left" >
+&lt;img src="https://shane.ai/ox-hugo/deps.png" />
+&lt;/figure>
+&lt;h3 id="wrapping-up">Wrapping up&lt;/h3>
+&lt;p>This is far from an exhausive post, I&amp;rsquo;m not even sure it was worth writing but so often things like compilers and jits are seen as magic,
+which to be honest they kind of are, and I&amp;rsquo;m hopeful that this post helps people unfamiliar with C or jits start to build a mental model
+of how the computer can map their code and data into something it understands.&lt;/p>
+&lt;p>There&amp;rsquo;s no particular action item to take away. No simple way to make your code fast. In fact javascript runtimes contain so many
+heuristics and tricks that sometimes the code that seems like it should run faster runs slower (for example there are many optimizations around
+string building and the runtimes can often use fancy datastructures like ropes to speed things up).&lt;/p>
+&lt;p>If there&amp;rsquo;s one performance takeaway I would give to the audience of this post, it&amp;rsquo;s this:&lt;/p>
+&lt;p>Use a profiler. v8 supports writing symbol maps for linux perf to consume. Chrome has a ton of debug tools. Firefox has great trace viewing
+infrastructure. Put your application under a magnifying class and try to understand where it&amp;rsquo;s spending time. Even if your application is faster
+than it needs to be it&amp;rsquo;s still nice to know. Is it parsing JSON? Interacting with the DOM? Get a baseline so that as you collect new profiles and develop new features you can spot weird regressions.&lt;/p>
+&lt;p>And ask yourself if that makes sense. At my current job alot of programs spend alot of time parsing protocol buffers. This is fairly reasonable. At previous
+jobs our caching edge ingress proxies spent alot of time gzipping uncacheable content and doing TLS. This was somewhat reasonable but pointed to opportunities
+to improve the customer experience by making more content cacheable.&lt;/p>
+&lt;p>Hopefully you found some of this informative, now go out there and put an application under a magnifying glass. I guarantee you&amp;rsquo;ll be surprised at what you find.&lt;/p></content></item><item><title>CGO Performance In Go 1.21</title><link>https://shane.ai/posts/cgo-performance-in-go1.21/</link><pubDate>Fri, 01 Sep 2023 14:42:00 -0700</pubDate><guid>https://shane.ai/posts/cgo-performance-in-go1.21/</guid><description>Tl;Dr Cgo calls take about 40ns, about the same time encoding/json takes to parse a single digit integer. On my 20 core machine Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.
 Disclaimer While alot of this article argues that &amp;ldquo;Cgo performance is good actually&amp;rdquo;, please don&amp;rsquo;t take that to mean &amp;ldquo;Cgo is good actually&amp;rdquo;. I&amp;rsquo;ve maintained production applications that use Cgo and non-trivial bindings to lua.</description><content>&lt;h2 id="tl-dr">Tl;Dr&lt;/h2>
 &lt;p>Cgo calls take about 40ns, about the same time &lt;code>encoding/json&lt;/code> takes to parse a single digit integer. On my 20 core machine
 Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.&lt;/p>
