@@ -353,11 +353,13 @@ CLOSED: [2023-09-26 Tue 13:34]
 :END:
 
 Recently I read a fantastic article walking through jit optimizations
-and how changes to source code could impact those: [[https://www.recompiled.dev/blog/deopt/][Side effecting a deopt]]
+and how changes to source code could impact those: [[https://www.recompiled.dev/blog/deopt/][Side effecting a deopt]].
 
 As I shared it with folks, a few of them had some questions about low level optmizations in general and
 I wrote this as a little explainer for people who are interested in learning more about how
-javascript runtimes can model/compile/jit/execute their js code.
+javascript runtimes can model/compile/jit/execute their js code. So I wrote this explainer
+to go along with the original article. Important: please read the original article first or have it pulled up next to this
+article.
 
 My goal is that by the time we're done the reader understands a bit more about:
 
@@ -386,17 +388,22 @@ About the only time I mention hex is when discussing the output of optimization 
 because we'll deal with things like ~0x2~ which is 2. And ~0xc~ which is 13.
 
 
+
 ** Disclaimers:
 
-Also the real world calls RAM indexes pointers. I'm
-hopeful that using RAM index as if RAM is an array of bytes is clearer for the target audience. But feel free
+I'm going to be using the madeup phrase "RAM indexes". The real world calls "RAM indexes" pointers. I'm
+hopeful that using "RAM index" as if RAM is an array of bytes is clearer for the target audience. But feel free
 to translate statements like ~RAM[foo]~ to ~*foo~. Similarly I will talk alot about records that are packed,
-the normal industry nomenclature would probably be ~C struct~ (with some caveats around packing, padding, field ordering, etc). As one
-last thing: I'm pretending in this example that our computers have byte sized words and that ASCII is great because
-32bit/64bit and utf8/utf16 don't add anything to this post and we'd have to count in multiples of 4 or 8. Finally
-my hashtables aren't fast at all.
+the normal industry nomenclature would probably be ~C struct~ (with some caveats around packing, padding, field ordering, etc).
+I'm pretending in this example that our computers have byte sized words and that ASCII is great because
+32bit/64bit and utf8/utf16 don't add anything to this post and we'd have to count in multiples of 4 or 8.
+Finally my hashtables aren't fast at all. I literally just want people to conceptualize the basic idea of hashing a key to find a bucket
+as an alternative to some sort of linear search.
 
-** More notation: how computers *address* RAM
+
+** How to represent data in RAM
+
+The atomic unit of data we'll talk about today is a byte. It's a series of 8 ones and zeros. Or it's a number between 0 and 255 (because ~2^8=256~).
 
 If we want to model some sort of record on the computer, such as a person who has a numeric id and a numeric age, we have to come up with a way of
 representing those objects in memory and referring to them. Most of the readers here understand what I mean when I say something like ~let Person = {id:0, age:24}~, but computers don't.
@@ -409,9 +416,10 @@ an array of 2 persons in RAM:
 | RAM value  |  1 |  24 |  2 |  28 | 0 | 0 | 0 | 0 | 0 |
 | Field name | id | age | id | age |   |   |   |   |   |
 
-So now if you tell a computer where the object starts (via pointer or RAM index), it knows the id is at offset 0, and the age is at offset 1. It knows the size of a person record (2 bytes).
+So now if you tell a computer where the object starts (via pointer or RAM index), it knows the ~id~ is at offset 0, and the ~age~ is at offset 1. It knows the size of a ~person~ record (2 bytes).
 If it needs to operate on those values (LOAD/STORE/MOV low level assembly instructions)
-it can directly write machine code that uses those offsets. Let's write some psuedocode for returning the age of the 2nd person:
+it can directly write machine code that uses those offsets. Let's write some psuedocode for returning the age of the 2nd person that somewhat mirrors the actual instructions your computer
+executes.
 
 #+begin_src js
 let persons_array = ;// some number that is an index into RAM
@@ -420,30 +428,30 @@ let age_offset = 1;
 person_2_age = RAM[
     persons_array +// where the array starts
 	size_of_person +// skip ahead 1
-	age_offset
-]; // age is 2nd value
+	age_offset // age is 2nd value
+]; 
 // or equivalantly: one addition. one ram lookup.
 person_2_age = RAM[persons_array+3];
 #+end_src
 
 Let's show one more example for strings. Unfortunately strings are variable length. So if you have a record like ~let person = [{id:"id2", age:29}, {id:"id10", age:40}]~ those
-strings can't be packed into the same orderly layout as above where each field starts at a fixed offset. We typically store the strings somewhere else and store the RAM index of that location in the person record. Let's draw that out. We because these
-strings are variable length we use a special marker character called null or ~\0~ to indicate end of string. This is how the c programming language represents strings historically.
+strings can't be packed into the same orderly layout as above where each field starts at a fixed offset. We typically store the strings somewhere else and store the RAM index of that location in the person record. Let's draw that out: because these
+strings are variable length we use a special marker character called null or ~\0~ to indicate end of string. This is how the C programming language represents strings historically.
 
 | RAM index  |  0 |   1 |  2 |   3 | 4 | 5 | 6 |  7 | 8 |   |   |   |    |
 | RAM value  |  4 |  29 |  8 |  30 | i | d | 2 | \0 | i | d | 1 | 0 | \0 |
 | field name | id | age | id | age |   |   |   |    |   |   |   |   |    |
 
 
-The big thing to notice here is the RAM value for the id. 4 and 8. Those correspond to RAM index 4 and 8. Saying "here's a fixed sized number who's value is where you can find the variable
-sized data". So now you have enough background to understand a really basic record/object type. This is an idealized example, in the real world the actual layout can be more complicated but
-for our purposes today this is a good enough mental model of "how to layout an object in memory for maximum speed".
+The big thing to notice here is the RAM value for the ~id~. ~4~ and ~8~. Those correspond to RAM index ~4~ and ~8~. Saying "here's a fixed sized number who's value is where you can find the variable
+sized data". So now you have enough background to understand a really basic record/object/struct type. This is an idealized example, in the real world the actual layout can be more complicated but
+for our purposes today this is a good enough mental model of "how to layout an object in memory to make it easy for the CPU to get your data".
 
 ** Hashtable basics
 
 Now the problem is that the above techniques do not allow us to deal with arbitrary field names. We can't add fields later on or that would mess up all the calculations like "load the 2nd byte of the
-record to get the age". Javascript ~Objects~ allow any number of property/value pairs (in the context of hashtables properties are called keys) and people need to quickly look up a key when they write ~x.foo~. Let's sketch a couple ways people could store those in memory.
-The simplest method is to put all the values right next to each other one after another and use ~\0~ to separate them.
+record to get the ~age~". Javascript ~Objects~ allow any number of property/value pairs (in the context of hashtables properties are called keys) and people need to quickly look up a key when they write ~x.foo~. Let's sketch a couple ways people could store those in memory.
+The simplest method is to put all the values right next to each other one after another and use ~\0~ to separate them. Here's a way to encode ~{"key1":"value1", "key2":"value2"}~
 
 | RAM index | 0 | 1 | 2 | 3 |  4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 |
 | RAM value | k | e | y | 1 | \0 | v | a | l | u | e |  2 | \0 |  k |  e |  y |  2 | \0 |  v |  a |  l |  u |  e |  2 | \0 |
@@ -451,8 +459,9 @@ The simplest method is to put all the values right next to each other one after 
 So if we stored data this way we could pretty easily write some psuedocode for looking up a key/value pair. Just compare the current key in memory with the
 property name you are looking for byte by byte. If it doesn't match, skip the next value until you find a null, and start over. Unfortunately this would be slow because
 the farther along your key is, the longer you have to search. So we have something called hashtables. The basic idea of a hashtable is we have some function to convert our
-keys to numbers. Then we convert those numbers to a bucket index. So I might have 10 buckets and when I store "foo" I run a function which says hash("foo") = some random number like 12313213
-and then I convert that to a bucket index by saying ~12313213%10 = 3~. Then in bucket number 3 I store something like: ~foo\0value\0~. The great thing about this
+keys to numbers. Then we convert those numbers to a bucket index. A hashtable has several fixed sized buckets right next to each other in RAM. So I might have 10 buckets and when I store "foo" I run a
+function which says hash("foo") = some random number like 12313213
+and then I convert that to a bucket index by saying ~12313213%10 = 3~. Then in bucket number 3 I store something like: ~foo\0value\0~ (well actually it's fixed sized. In bucket number 3 I store the RAM index of some other piece of memory that holds ~foo\0value\0~. The great thing about this
 is that as long as there are no collisions (2 different keys that go to the same bucket) I can find any property without looking at all the data. The overhead for finding a value in a hashtable
 without collisions just depends on how long it takes to run ~hash(key)~ and not on the number of keys in the hashtable. I can handle collisions (multiple properties
 ending up in the same bucket) by just using the strategy listed above and smashing key value pairs together. Without going into too much detail, real world hashtables have better strategies for minimizing collisions by detecting
@@ -560,7 +569,7 @@ might execute each version of the program.
 
 I'm intentionally trying to omit some boring details while giving you an idea of the work the CPU is doing. What's important if we're trying to optimize the performance of ~load~
 is to notice that we're probably doing alot of work hashing the foo key to find where ~1~ is stored. But we're smart and we looked at the code and decided that we can replace all the above steps
-with just the last one : call ~console.log()~ with the value ~1~. And that is why in the referenced blog post the author points out that the runtime debug information printed out:
+with just the last one : call ~console.log()~ with the value ~1~. And that is why in the [[https://www.recompiled.dev/blog/deopt/][referenced blog post]] the author points out that the runtime debug information printed out:
 
 #+begin_src sh
 0x280008150   130  d2800040       movz x0, #0x2
