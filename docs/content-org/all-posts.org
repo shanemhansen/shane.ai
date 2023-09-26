@@ -347,7 +347,7 @@ import (
 
 
 * DONE Some notes on javascript jit and deopt
-CLOSED: [2023-09-21 Thu 15:52]
+CLOSED: [2023-09-26 Tue 13:34]
 :PROPERTIES:
 :EXPORT_FILE_NAME: notes-on-javascript-jit-deopt.org
 :END:
