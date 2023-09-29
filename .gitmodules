@@ -1,0 +1,3 @@
+[submodule "docs/themes/hugo-theme-terminal"]
+	path = docs/themes/hugo-theme-terminal
+	url = git@github.com:shanemhansen/hugo-theme-terminal

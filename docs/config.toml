@@ -5,20 +5,43 @@ title = "Words from Shane"
 googleAnalytics = 'G-BFC5BJW2FE'
 
 [params]
-author="shane"
+author="Shane Hansen"
 themeColor = "pink"
 contentTypeName = "posts"
-
+fullWidthTheme = false
+centerTheme = false
+showMenuItems = 2
+showLanguageSelector = false
+autoCover = true
+showLastUpdated = false
+[params.twitter]
+creator = ""
+site = ""
 
 [author]
-name="shane"
+name="Shane Hansen"
 
-[module]
 [[module.imports]]
-path = 'github.com/panr/hugo-theme-terminal'
-
+  path = 'github.com/shanemhansen/hugo-theme-terminal/v3'
+  
 [languages]
   [languages.en]
+    languageName = "English"
+    title = "Words from Shane"
+    [languages.en.params]
+    subtitle = "On tech"
+    owner = ""
+    keywords = ""
+    copyright = ""
+    menuMore = "Show more"
+    readMore = "more"
+    readOtherPosts = "Read other posts"
+    newerPosts = "Newer posts"
+    olderPosts = "Older posts"
+    missingContentMessage = "Page not found..."
+    missingBackButtonLabel = "Back to home page"
+    minuteReadingTime = "min read"
+    words = "words"
     [languages.en.params.logo]
       logoText = "Shane.ai"
     [languages.en.menu]
