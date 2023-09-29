@@ -51,4 +51,5 @@ name="Shane Hansen"
         url = "/about"
 [markup.goldmark.renderer]
 unsafe = true
-  
+[outputs]
+page = ["html", "rss"]
