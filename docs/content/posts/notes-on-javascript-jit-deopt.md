@@ -1,6 +1,6 @@
 +++
-title = "Some notes on javascript jit and deopt"
-author = ["Shane Hansen"]
+title = "Some notes on 'javascript jit and deopt'"
+author = ["shane"]
 date = 2023-09-26T13:34:00-07:00
 draft = false
 +++
