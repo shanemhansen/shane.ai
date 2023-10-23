@@ -1,5 +1,5 @@
 +++
-title = "Some notes on 'javascript jit and deopt'"
+title = "Some notes on javascript jit and deopt"
 author = ["shane"]
 date = 2023-09-26T13:34:00-07:00
 draft = false
@@ -128,12 +128,12 @@ draw this as a graph and then also as a linear array of bytes if we just append 
 
 Here's a table of numbers for representing the same thing. We have a person value which consists of a bucket count and a buckets RAM index. The bucket's RAM index
 is where the bucket list starts. Next up we have the 2 buckets. In the real world all of this wouldn't be packed so close. Which is important for adding more buckets
-and more key/values. Our first bucket points to index 4, which is where they key/valuy pair "name:bob" is stored, etc.
+and more key/values. Our first bucket points to index 4, which is where they key/value pair "name:bob" is stored, etc.
 
-| RAM index | 0           | 1              | 2         | 3         | 4 | 5 | 6 | 7 | 8   | 8 | 9 | 10 | 11  | 12 | 13 | 14 | 15  | 16 | 17 | 18  | 19 | 20 | 21  | 22 | 23 | 24 | 25  |
-|-----------|-------------|----------------|-----------|-----------|---|---|---|---|-----|---|---|----|-----|----|----|----|-----|----|----|-----|----|----|-----|----|----|----|-----|
-| RAM value | 2           | 2              | 4         | 17        | n | a | m | e | \\0 | b | o | b  | \\0 | a  | g  | e  | \\0 | 2  | 1  | \\0 | i  | d  | \\0 | i  | d  | 3  | \\0 |
-| field     | bucketCount | bucketRamIndex | bucket[0] | bucket[1] |   |   |   |   |     |   |   |    |     |    |    |    |     |    |    |     |    |    |     |    |    |    |     |
+| RAM index | 0           | 1              | 2         | 3         | 4 | 5 | 6 | 7 | 8   | 9 | 10 | 11 | 12  | 13 | 14 | 15 | 16  | 17 | 18 | 19  | 20 | 21 | 22  | 23 | 24 | 25 | 26  |
+|-----------|-------------|----------------|-----------|-----------|---|---|---|---|-----|---|----|----|-----|----|----|----|-----|----|----|-----|----|----|-----|----|----|----|-----|
+| RAM value | 2           | 2              | 4         | 20        | n | a | m | e | \\0 | b | o  | b  | \\0 | a  | g  | e  | \\0 | 2  | 1  | \\0 | i  | d  | \\0 | i  | d  | 3  | \\0 |
+| field     | bucketCount | bucketRamIndex | bucket[0] | bucket[1] |   |   |   |   |     |   |    |    |     |    |    |    |     |    |    |     |    |    |     |    |    |    |     |
 
 So this should give you a basic idea that looking up a hashtable key stays fast as you add more items, as long as you don't have alot more items than buckets. But now instead of the
 cpu being able to translate something like `person.name` into a fixed offset from person, it must instead do the following psuedocode.
