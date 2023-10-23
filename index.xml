@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Words from Shane</title><link>https://shane.ai/</link><description>Recent content on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Tue, 26 Sep 2023 13:34:00 -0700</lastBuildDate><atom:link href="https://shane.ai/index.xml" rel="self" type="application/rss+xml"/><item><title>Some notes on 'javascript jit and deopt'</title><link>https://shane.ai/posts/notes-on-javascript-jit-deopt/</link><pubDate>Tue, 26 Sep 2023 13:34:00 -0700</pubDate><guid>https://shane.ai/posts/notes-on-javascript-jit-deopt/</guid><description>Recently I read a fantastic article walking through jit optimizations and how changes to source code could impact those: Side effecting a deopt.
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Words from Shane</title><link>https://shane.ai/</link><description>Recent content on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Tue, 26 Sep 2023 13:34:00 -0700</lastBuildDate><atom:link href="https://shane.ai/index.xml" rel="self" type="application/rss+xml"/><item><title>Some notes on javascript jit and deopt</title><link>https://shane.ai/posts/notes-on-javascript-jit-deopt/</link><pubDate>Tue, 26 Sep 2023 13:34:00 -0700</pubDate><guid>https://shane.ai/posts/notes-on-javascript-jit-deopt/</guid><description>Recently I read a fantastic article walking through jit optimizations and how changes to source code could impact those: Side effecting a deopt.
 As I shared it with folks, a few of them had some questions about low level optmizations in general and I wrote this as a little explainer for people who are interested in learning more about how javascript runtimes can model/compile/jit/execute their js code. So I wrote this explainer to go along with the original article.</description><content>&lt;p>Recently I read a fantastic article walking through jit optimizations
 and how changes to source code could impact those: &lt;a href="https://www.recompiled.dev/blog/deopt/">Side effecting a deopt&lt;/a>.&lt;/p>
 &lt;p>As I shared it with folks, a few of them had some questions about low level optmizations in general and
@@ -265,7 +265,7 @@ draw this as a graph and then also as a linear array of bytes if we just append 
 &lt;/figure>
 &lt;p>Here&amp;rsquo;s a table of numbers for representing the same thing. We have a person value which consists of a bucket count and a buckets RAM index. The bucket&amp;rsquo;s RAM index
 is where the bucket list starts. Next up we have the 2 buckets. In the real world all of this wouldn&amp;rsquo;t be packed so close. Which is important for adding more buckets
-and more key/values. Our first bucket points to index 4, which is where they key/valuy pair &amp;ldquo;name:bob&amp;rdquo; is stored, etc.&lt;/p>
+and more key/values. Our first bucket points to index 4, which is where they key/value pair &amp;ldquo;name:bob&amp;rdquo; is stored, etc.&lt;/p>
 &lt;table>
 &lt;thead>
 &lt;tr>
@@ -278,7 +278,6 @@ and more key/values. Our first bucket points to index 4, which is where they key
 &lt;th>5&lt;/th>
 &lt;th>6&lt;/th>
 &lt;th>7&lt;/th>
-&lt;th>8&lt;/th>
 &lt;th>8&lt;/th>
 &lt;th>9&lt;/th>
 &lt;th>10&lt;/th>
@@ -297,6 +296,7 @@ and more key/values. Our first bucket points to index 4, which is where they key
 &lt;th>23&lt;/th>
 &lt;th>24&lt;/th>
 &lt;th>25&lt;/th>
+&lt;th>26&lt;/th>
 &lt;/tr>
 &lt;/thead>
 &lt;tbody>
@@ -305,7 +305,7 @@ and more key/values. Our first bucket points to index 4, which is where they key
 &lt;td>2&lt;/td>
 &lt;td>2&lt;/td>
 &lt;td>4&lt;/td>
-&lt;td>17&lt;/td>
+&lt;td>20&lt;/td>
 &lt;td>n&lt;/td>
 &lt;td>a&lt;/td>
 &lt;td>m&lt;/td>
