@@ -45,7 +45,7 @@ func main() {
 }
 ```
 
-Now let's inspect what this program does using strace. Today I want to know when it `connects` to a service and what code path lead there. I'm going to
+Now let's inspect what this program does using strace. Today I want to know when it `connects` to a service and what code paths lead there. I'm going to
 use the Go DNS resolver as an example because Go ships with 2 DNS resolvers that we can compare via stack traces:
 
 1.  A pure Go resolver (generally used when static linking and cross compiling) where go handles all I/O and incidentally avoids a [common](https://httptoolkit.com/blog/configuring-nodejs-dns/) issue with evented runtimes and libc dns
