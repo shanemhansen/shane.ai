@@ -1,0 +1,151 @@
+<!doctype html><html lang=en><head><title>Backtraces with strace :: Words from Shane</title><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=description content="I discovered strace somewhere between my first part time web development part time job in 2005 and my first full time &amp;ldquo;software engineering&amp;rdquo; job in 2008, and it seemed like a superpower giving me x-ray vision into running infrastructure. When a process was stuck, or existing after a cryptic error message, instead of grepping around I could get a pretty good timeline of what the process was up to.
+It has some fatal flaws, the ptrace based technology can cause performance issues so it&amp;rsquo;s mostly not suited to running in production (unless you were one of my personal heros: the old mysql@facebook team which liked to live dangerously and often used ptrace based debuggers to obtain life profiling data)."><meta name=keywords content><meta name=robots content="noodp"><link rel=canonical href=https://shane.ai/posts/backtraces-with-strace/><script async src="https://www.googletagmanager.com/gtag/js?id=G-BFC5BJW2FE"></script>
+<script>var doNotTrack=!1;if(!doNotTrack){window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date),gtag("config","G-BFC5BJW2FE",{anonymize_ip:!1})}</script><link rel=stylesheet href=https://shane.ai/styles.css><link rel="shortcut icon" href=https://shane.ai/img/theme-colors/pink.png><link rel=apple-touch-icon href=https://shane.ai/img/theme-colors/pink.png><meta name=twitter:card content="summary"><meta name=twitter:site content><meta name=twitter:creator content="[shane]"><meta property="og:locale" content="en"><meta property="og:type" content="article"><meta property="og:title" content="Backtraces with strace"><meta property="og:description" content="I discovered strace somewhere between my first part time web development part time job in 2005 and my first full time &amp;ldquo;software engineering&amp;rdquo; job in 2008, and it seemed like a superpower giving me x-ray vision into running infrastructure. When a process was stuck, or existing after a cryptic error message, instead of grepping around I could get a pretty good timeline of what the process was up to.
+It has some fatal flaws, the ptrace based technology can cause performance issues so it&amp;rsquo;s mostly not suited to running in production (unless you were one of my personal heros: the old mysql@facebook team which liked to live dangerously and often used ptrace based debuggers to obtain life profiling data)."><meta property="og:url" content="https://shane.ai/posts/backtraces-with-strace/"><meta property="og:site_name" content="Words from Shane"><meta property="og:image" content="https://shane.ai/img/favicon/pink.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="627"><meta property="article:published_time" content="2023-11-06 16:22:00 -0800 -0800"><link href=/posts/backtraces-with-strace/index.xml rel=alternate type=application/rss+xml title="Words from Shane"></head><body class=pink><div class="container headings--one-size"><header class=header><div class=header__inner><div class=header__logo><a href=https://shane.ai/><div class=logo>Shane.ai</div></a></div><ul class="menu menu--mobile"><li class=menu__trigger>Menu&nbsp;▾</li><li><ul class=menu__dropdown><li><a href=/about>About</a></li></ul></li></ul></div><nav class=navigation-menu><ul class="navigation-menu__inner menu--desktop"><li><a href=/about>About</a></li></ul></nav></header><div class=content><article class=post><h1 class=post-title><a href=https://shane.ai/posts/backtraces-with-strace/>Backtraces with strace</a></h1><div class=post-meta><time class=post-date>2023-11-06</time><span class=post-author>[shane]</span></div><div class=post-content><div><p>I discovered <a href=https://man7.org/linux/man-pages/man1/strace.1.html>strace</a> somewhere between my first part time web development part time job in 2005
+and my first full time &ldquo;software engineering&rdquo; job in 2008, and it seemed like a superpower giving me x-ray
+vision into running infrastructure. When a process was stuck, or existing after a cryptic error message,
+instead of grepping around I could get a pretty good timeline of what the process was up to.</p><p>It has some fatal flaws, the <code>ptrace</code> based technology can cause performance issues so it&rsquo;s mostly not suited to running in production (unless you were
+one of my personal heros: the old mysql@facebook team which liked to live dangerously and often used <code>ptrace</code> based debuggers to obtain life profiling data).
+If you&rsquo;re intro history of performance engineering before <code>perf</code> and <code>ebpf</code> and friends, I highly recommend reading up on <a href=https://dom.as/2010/10/08/more-on-pmp/>poor mans profiler</a>.</p><p>After 15+ years I thought I knew most of the useful features, but last month I found a new incredibly useful flag: <code>--stack-traces</code>. It appears
+it was added in 2014 and I&rsquo;m just finding out about it now! When you specify the <code>--stack-traces</code> flag strace will print the stack trace that
+resulted in the system call. I was debugging some complex signal handling interactions between Go and Cgo and while I knew someone was messing
+with the signal I didn&rsquo;t know who. After a couple hours of grepping the entire codebase I just wasn&rsquo;t sure how the code ended up doing what it did.</p><p>But I did something that works surprisingly often on the internet: I imagined the feature I wanted existed and googled for it (or looked at the man page),
+so after a quick look for &ldquo;strace stack traces&rdquo; I found the feature existed! When enabled it will cause <code>strace</code> to print stacktraces so you can see
+how the code got where it got. Let&rsquo;s look at an example with a small <code>go</code> program to just get a feel for how a single DNS resolution is handled and how <code>--stack-traces</code>
+can help us understrand the architecture of an application.</p><h2 id=stracing-the-pure-go-dns-resolver>stracing the pure go DNS resolver<a href=#stracing-the-pure-go-dns-resolver class=hanchor arialabel=Anchor>&#8983;</a></h2><p>Here is a simple go program that looks up the IP addresses associated with the <code>shane.ai</code> domain.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-go data-lang=go><span style=display:flex><span><span style=color:#f92672>import</span> (
+</span></span><span style=display:flex><span>	<span style=color:#e6db74>&#34;net&#34;</span>
+</span></span><span style=display:flex><span>	<span style=color:#e6db74>&#34;fmt&#34;</span>
+</span></span><span style=display:flex><span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>func</span> <span style=color:#a6e22e>main</span>() {
+</span></span><span style=display:flex><span>	<span style=color:#a6e22e>names</span>, <span style=color:#a6e22e>err</span> <span style=color:#f92672>:=</span> <span style=color:#a6e22e>net</span>.<span style=color:#a6e22e>LookupHost</span>(<span style=color:#e6db74>&#34;shane.ai&#34;</span>)
+</span></span><span style=display:flex><span>	<span style=color:#66d9ef>if</span> <span style=color:#a6e22e>err</span> <span style=color:#f92672>!=</span> <span style=color:#66d9ef>nil</span> {
+</span></span><span style=display:flex><span>		panic(<span style=color:#a6e22e>err</span>)
+</span></span><span style=display:flex><span>	}
+</span></span><span style=display:flex><span>	<span style=color:#66d9ef>for</span> <span style=color:#a6e22e>_</span>, <span style=color:#a6e22e>name</span> <span style=color:#f92672>:=</span> <span style=color:#66d9ef>range</span> <span style=color:#a6e22e>names</span> {
+</span></span><span style=display:flex><span>		<span style=color:#a6e22e>fmt</span>.<span style=color:#a6e22e>Printf</span>(<span style=color:#e6db74>&#34;%s\n&#34;</span>, <span style=color:#a6e22e>name</span>)
+</span></span><span style=display:flex><span>	}
+</span></span><span style=display:flex><span>}
+</span></span></code></pre></div><p>Now let&rsquo;s inspect what this program does using strace. Today I want to know when it <code>connects</code> to a service and what code path lead there. I&rsquo;m going to
+use the Go DNS resolver as an example because Go ships with 2 DNS resolvers that we can compare via stack traces:</p><ol><li>A pure Go resolver (generally used when static linking and cross compiling) where go handles all I/O and incidentally avoids a <a href=https://httptoolkit.com/blog/configuring-nodejs-dns/>common</a> issue with evented runtimes and libc dns</li><li>A cgo based resolver which uses libc</li></ol><p>First lets look at the highlights from the pure Go version. We see a couple of <code>SOCK_DGRAM</code> sockets
+opened in non-blocking mode (which makes sense since Go&rsquo;s big thing is kind of non-blocking network I/O).
+We connect to <code>127.0.0.53</code> which is the system configured resolver on my machine. Note that my <code>main</code>
+function isn&rsquo;t in the stack trace, so Go uses a separate goroutine for the lookup. My current understanding
+is this is part of ipv6 support and the <a href=https://en.wikipedia.org/wiki/Happy_Eyeballs>happy eyeballs</a> algorithm which involves concurrent lookups for ipv4 & ipv6.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-sh data-lang=sh><span style=display:flex><span>export GOMACPROCS<span style=color:#f92672>=</span><span style=color:#ae81ff>1</span>
+</span></span><span style=display:flex><span>export GODEBUG<span style=color:#f92672>=</span>netdns<span style=color:#f92672>=</span>go
+</span></span><span style=display:flex><span>go build -trimpath -o dnscheck .
+</span></span><span style=display:flex><span>strace -fze socket,connect --stack-trace ./dnscheck 2&gt;&amp;<span style=color:#ae81ff>1</span> | sed -e <span style=color:#e6db74>&#39;s|/home/shane/src/||g&#39;</span> | head -50
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-text data-lang=text><span style=display:flex><span>strace: Process 88648 attached
+</span></span><span style=display:flex><span>strace: Process 88649 attached
+</span></span><span style=display:flex><span>strace: Process 88650 attached
+</span></span><span style=display:flex><span>strace: Process 88651 attached
+</span></span><span style=display:flex><span>strace: Process 88652 attached
+</span></span><span style=display:flex><span>[pid 88647] socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 3
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime/internal/syscall.Syscall6+0xe) [0x3aee]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.RawSyscall+0x15) [0x7b5f5]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.socket+0x25) [0x7afa5]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.Socket+0x3d) [0x79f7d]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.sysSocket+0x3a) [0xad65a]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.socket+0x65) [0xadc25]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.internetSocket+0xf1) [0xa77f1]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialUDP+0xa5) [0xb1145]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialSingle+0x2b2) [0x9a2b2]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialSerial+0x248) [0x99b88]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialParallel+0x3e5) [0x99245]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Dialer).DialContext+0x6de) [0x98c9e]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).dial+0xa5) [0xa96a5]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).exchange+0x36a) [0x9bbea]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).tryOneName+0x466) [0x9cd06]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).goLookupIPCNAMEOrder.func3.1+0x85) [0xa0165]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).goLookupIPCNAMEOrder.func3.2+0x27) [0xa00a7]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.goexit.abi0+0x1) [0x65201]
+</span></span><span style=display:flex><span>[pid 88647] connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime/internal/syscall.Syscall6+0xe) [0x3aee]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.Syscall+0x46) [0x7b646]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.connect+0x29) [0x7ab49]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.Connect+0x46) [0x79bc6]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*netFD).connect+0x78) [0xa1958]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*netFD).dial+0x3b2) [0xae2f2]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.socket+0x294) [0xade54]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.internetSocket+0xf1) [0xa77f1]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialUDP+0xa5) [0xb1145]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialSingle+0x2b2) [0x9a2b2]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialSerial+0x248) [0x99b88]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*sysDialer).dialParallel+0x3e5) [0x99245]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Dialer).DialContext+0x6de) [0x98c9e]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).dial+0xa5) [0xa96a5]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).exchange+0x36a) [0x9bbea]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).tryOneName+0x466) [0x9cd06]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).goLookupIPCNAMEOrder.func3.1+0x85) [0xa0165]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.(*Resolver).goLookupIPCNAMEOrder.func3.2+0x27) [0xa00a7]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.goexit.abi0+0x1) [0x65201]
+</span></span><span style=display:flex><span>[pid 88650] socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 7
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime/internal/syscall.Syscall6+0xe) [0x3aee]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.RawSyscall+0x15) [0x7b5f5]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.socket+0x25) [0x7afa5]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(syscall.Socket+0x3d) [0x79f7d]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(net.sysSocket+0x3a) [0xad65a]
+</span></span></code></pre></div><h2 id=stracing-the-cgo-libc-dns-resolver>stracing the cgo libc DNS resolver<a href=#stracing-the-cgo-libc-dns-resolver class=hanchor arialabel=Anchor>&#8983;</a></h2><p>Let&rsquo;s see the difference when we use <code>cgo</code> on this ubuntu machine using systemd. <code>libc.so</code> &rsquo;s <code>getaddrinfo</code> is in the stack
+trace now. Also notice that it&rsquo;s using a <code>AF_UNIX</code> unix domain socket for some communication. It looks like on my machine it&rsquo;s
+an unused part of glibc where system dns can be accessed via a unix domain socket: <code>/var/run/nscd/socket</code>. There&rsquo;s an explanation of <a href=https://jameshfisher.com/2018/02/05/dont-use-nscd/>glibc&rsquo;s behaviour here</a>.</p><p>So after glibc wastes some time looking for a service that&rsquo;s not running, it also opens up some <code>SOCK_DGRAM</code> sockets and as expected
+they are in blocking mode. Which means that like node, when Go uses the system resolver it has to use a threadpool instead
+of just using evented I/O. This has generally annoyed people because Go&rsquo;s home rolled DNS resolver isn&rsquo;t 100% compatible with glibc and sometimes that breaks things.
+Skipping glibc tends to annoy system administrators.</p><p>However accessing the &ldquo;system&rdquo; resolver via blocking <code>cgo</code> calls by default causes unexpected resource issues. People are often not really prepared
+for their Go programs to be running tons of threads, usually Go keeps threads near <code>GOMAXPROCS</code> which is by default equal to the number of cores on your
+machine. Having an outage due to thread pools where you expected to see a handful but instead saw 10k tends to annoy developers and users.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-sh data-lang=sh><span style=display:flex><span>export GOMACPROCS<span style=color:#f92672>=</span><span style=color:#ae81ff>1</span>
+</span></span><span style=display:flex><span>export GODEBUG<span style=color:#f92672>=</span>netdns<span style=color:#f92672>=</span>cgo
+</span></span><span style=display:flex><span>go build -trimpath -o dnscheck .
+</span></span><span style=display:flex><span>strace -fze socket,connect --stack-trace ./dnscheck 2&gt;&amp;<span style=color:#ae81ff>1</span> | sed -e <span style=color:#e6db74>&#39;s|/home/shane/src/||g&#39;</span> | head -50
+</span></span></code></pre></div><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-text data-lang=text><span style=display:flex><span>strace: Process 90067 attached
+</span></span><span style=display:flex><span>strace: Process 90068 attached
+</span></span><span style=display:flex><span>strace: Process 90069 attached
+</span></span><span style=display:flex><span>strace: Process 90070 attached
+</span></span><span style=display:flex><span>strace: Process 90071 attached
+</span></span><span style=display:flex><span>[pid 90066] socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__socket+0xb) [0x12031b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(svc_run+0x38b1) [0x169301]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(svc_run+0x3f01) [0x169951]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(svc_run+0x4397) [0x169de7]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(svc_run+0x1dea) [0x16783a]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(getaddrinfo+0x1b92) [0x103f42]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.text+0x3b) [0x103b]
+</span></span><span style=display:flex><span>[pid 90066] socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__socket+0xb) [0x12031b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(svc_run+0x38b1) [0x169301]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(svc_run+0x45d7) [0x16a027]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(svc_run+0x1f07) [0x167957]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(getaddrinfo+0x1b92) [0x103f42]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.text+0x3b) [0x103b]
+</span></span><span style=display:flex><span>[pid 90066] socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 3
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__socket+0xb) [0x12031b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_randomid+0x199) [0x1473a9]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_context_send+0x2bf) [0x147e6f]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_context_query+0x1c1) [0x145de1]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_context_search+0x472) [0x146ac2]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(_nss_dns_gethostbyname4_r+0x251) [0x13e781]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(getaddrinfo+0x1ec0) [0x104270]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.text+0x3b) [0x103b]
+</span></span><span style=display:flex><span>[pid 90066] connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr(&#34;127.0.0.53&#34;)}, 16) = 0
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__connect+0x4b) [0x11fd2b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_randomid+0xfd) [0x14730d]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_context_send+0x2bf) [0x147e6f]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_context_query+0x1c1) [0x145de1]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__res_context_search+0x472) [0x146ac2]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(_nss_dns_gethostbyname4_r+0x251) [0x13e781]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(getaddrinfo+0x1ec0) [0x104270]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.text+0x3b) [0x103b]
+</span></span><span style=display:flex><span>[pid 90066] socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_ROUTE) = 3
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__socket+0xb) [0x12031b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__idna_from_dns_encoding+0x25b) [0x13be6b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(getaddrinfo+0x1273) [0x103623]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.text+0x3b) [0x103b]
+</span></span><span style=display:flex><span>[pid 90066] socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_IP) = 3
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__socket+0xb) [0x12031b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(getaddrinfo+0xd53) [0x103103]
+</span></span><span style=display:flex><span> &gt; dnscheck/dnscheck(runtime.text+0x3b) [0x103b]
+</span></span><span style=display:flex><span>[pid 90066] connect(3, {sa_family=AF_INET, sin_port=htons(0), sin_addr=inet_addr(&#34;185.199.111.153&#34;)}, 16) = 0
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(__connect+0x4b) [0x11fd2b]
+</span></span><span style=display:flex><span> &gt; /usr/lib/x86_64-linux-gnu/libc.so.6(getaddrinfo+0xa93) [0x102e43]
+</span></span></code></pre></div><h2 id=wrap-up>Wrap up<a href=#wrap-up class=hanchor arialabel=Anchor>&#8983;</a></h2><p>That&rsquo;s all folks. I hope that you don&rsquo;t need it, but if you ever do find yourself asking: &ldquo;what code is touching that thing!?&rdquo;
+<code>strace --stack-traces</code> I hope you&rsquo;ll land on this post and find that <code>strace</code> is at your service.</p><p>Maybe in the future I&rsquo;ll look at converting <code>strace --stack-traces</code> output to something compatible with <a href=https://profiler.firefox.com/>mozilla&rsquo;s trace viewer</a>. That sounds fun.</p></div></div><div class=pagination><div class=pagination__title><span class=pagination__title-h>Read other posts</span><hr></div><div class=pagination__buttons><span class="button next"><a href=https://shane.ai/posts/notes-on-javascript-jit-deopt/><span class=button__text>Some notes on javascript jit and deopt</span>
+<span class=button__icon>→</span></a></span></div></div></article></div><footer class=footer><div class=footer__inner><div class=copyright><span>© 2023 Powered by <a href=https://gohugo.io>Hugo</a></span>
+<span>:: <a href=https://github.com/panr/hugo-theme-terminal target=_blank>Theme</a> made by <a href=https://github.com/panr target=_blank>panr</a></span></div></div></footer><script type=text/javascript src=/bundle.min.js></script></div></body></html>
