@@ -29,7 +29,7 @@ can help us understrand the architecture of an application.&lt;/p>
 &lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> &lt;span style="color:#a6e22e">fmt&lt;/span>.&lt;span style="color:#a6e22e">Printf&lt;/span>(&lt;span style="color:#e6db74">&amp;#34;%s\n&amp;#34;&lt;/span>, &lt;span style="color:#a6e22e">name&lt;/span>)
 &lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span> }
 &lt;/span>&lt;/span>&lt;span style="display:flex;">&lt;span>}
-&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Now let&amp;rsquo;s inspect what this program does using strace. Today I want to know when it &lt;code>connects&lt;/code> to a service and what code path lead there. I&amp;rsquo;m going to
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Now let&amp;rsquo;s inspect what this program does using strace. Today I want to know when it &lt;code>connects&lt;/code> to a service and what code paths lead there. I&amp;rsquo;m going to
 use the Go DNS resolver as an example because Go ships with 2 DNS resolvers that we can compare via stack traces:&lt;/p>
 &lt;ol>
 &lt;li>A pure Go resolver (generally used when static linking and cross compiling) where go handles all I/O and incidentally avoids a &lt;a href="https://httptoolkit.com/blog/configuring-nodejs-dns/">common&lt;/a> issue with evented runtimes and libc dns&lt;/li>

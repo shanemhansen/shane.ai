@@ -25,7 +25,7 @@ can help us understrand the architecture of an application.</p><h2 id=stracing-t
 </span></span><span style=display:flex><span>		<span style=color:#a6e22e>fmt</span>.<span style=color:#a6e22e>Printf</span>(<span style=color:#e6db74>&#34;%s\n&#34;</span>, <span style=color:#a6e22e>name</span>)
 </span></span><span style=display:flex><span>	}
 </span></span><span style=display:flex><span>}
-</span></span></code></pre></div><p>Now let&rsquo;s inspect what this program does using strace. Today I want to know when it <code>connects</code> to a service and what code path lead there. I&rsquo;m going to
+</span></span></code></pre></div><p>Now let&rsquo;s inspect what this program does using strace. Today I want to know when it <code>connects</code> to a service and what code paths lead there. I&rsquo;m going to
 use the Go DNS resolver as an example because Go ships with 2 DNS resolvers that we can compare via stack traces:</p><ol><li>A pure Go resolver (generally used when static linking and cross compiling) where go handles all I/O and incidentally avoids a <a href=https://httptoolkit.com/blog/configuring-nodejs-dns/>common</a> issue with evented runtimes and libc dns</li><li>A cgo based resolver which uses libc</li></ol><p>First lets look at the highlights from the pure Go version. We see a couple of <code>SOCK_DGRAM</code> sockets
 opened in non-blocking mode (which makes sense since Go&rsquo;s big thing is kind of non-blocking network I/O).
 We connect to <code>127.0.0.53</code> which is the system configured resolver on my machine. Note that my <code>main</code>
