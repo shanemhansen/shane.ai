@@ -1,4 +1,44 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on Words from Shane</title><link>https://shane.ai/posts/</link><description>Recent content in Posts on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Mon, 06 Nov 2023 16:22:00 -0800</lastBuildDate><atom:link href="https://shane.ai/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>Backtraces with strace</title><link>https://shane.ai/posts/backtraces-with-strace/</link><pubDate>Mon, 06 Nov 2023 16:22:00 -0800</pubDate><guid>https://shane.ai/posts/backtraces-with-strace/</guid><description>I discovered strace somewhere between my first part time web development part time job in 2005 and my first full time &amp;ldquo;software engineering&amp;rdquo; job in 2008, and it seemed like a superpower giving me x-ray vision into running infrastructure. When a process was stuck, or existing after a cryptic error message, instead of grepping around I could get a pretty good timeline of what the process was up to.
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Posts on Words from Shane</title><link>https://shane.ai/posts/</link><description>Recent content in Posts on Words from Shane</description><generator>Hugo -- gohugo.io</generator><language>en</language><lastBuildDate>Mon, 10 Mar 2025 18:17:00 -0600</lastBuildDate><atom:link href="https://shane.ai/posts/index.xml" rel="self" type="application/rss+xml"/><item><title>Computer Science &amp; Software Engineering</title><link>https://shane.ai/posts/computer-science-software-engineering/</link><pubDate>Mon, 10 Mar 2025 18:17:00 -0600</pubDate><guid>https://shane.ai/posts/computer-science-software-engineering/</guid><description>I wrote this post to easily reference a concept that I find myself explaining frequently to software engineers.
+The concept is simple: computer science is not software engineering. By itself, the statement seems obviously true. Unfortunately our industry has a problem with conflating the two in a way that leads to bad outcomes in the products engineers create.
+An analogy with cars I like to compare it to the difference between physics and mechanical engineering.</description><content>&lt;p>I wrote this post to easily reference a concept that I find myself explaining
+frequently to software engineers.&lt;/p>
+&lt;p>The concept is simple: &lt;span class="underline">computer science is not software engineering&lt;/span>. By itself,
+the statement seems obviously true. Unfortunately our industry has a problem with conflating the two
+in a way that leads to bad outcomes in the products engineers create.&lt;/p>
+&lt;h2 id="an-analogy-with-cars">An analogy with cars&lt;/h2>
+&lt;p>I like to compare it to the difference between
+physics and mechanical engineering. I have no doubt that physics is an extremely important
+part of mechanical engineering. I want the folks designing my cars to actually know certain
+areas of physics pretty well. However when it comes to designing cars there are areas outside of
+physics that engineers are trained to consider. One example from my freshman engineering classes: In
+addition to science, engineering typically involves cost benefit analysis over the lifecycle of products.&lt;/p>
+&lt;p>Like any real world conversation, it&amp;rsquo;s more nuanced than saying &amp;ldquo;scientists write papers and discover knowledge&amp;rdquo; and
+&amp;ldquo;engineers use science to build things&amp;rdquo;, but that&amp;rsquo;s a decent first approximation. Scientists often
+do have to care about costs, sometimes they are researching new techniques that reduce cost. Engineers care about science,
+sometimes the work they are doing do tackle new problems results in new science being created. But I hope you&amp;rsquo;ll agree
+it&amp;rsquo;s still fair to say: Science and Engineering are different disciplines.&lt;/p>
+&lt;h2 id="how-this-applies-to-cs-swe">How this applies to CS/SWE&lt;/h2>
+&lt;p>It&amp;rsquo;s common in the tech industry to hire CS graduates as software engineers. In my experience the reasons why
+are:&lt;/p>
+&lt;ul>
+&lt;li>CS grads have tools to avoid certain catastrophic performance cliffs due to big O complexity.&lt;/li>
+&lt;li>CS grads and some other &amp;ldquo;hard science&amp;rdquo; or math degrees are considered to be evidence of being &amp;ldquo;smart enough&amp;rdquo; to do SWE work.&lt;/li>
+&lt;/ul>
+&lt;p>Just like in the physics/mechanical engineering example above, I want the people
+building my apps and services to know some computer science. In addition I want them to understand engineering tradeoffs. Bizarrely,
+I find a lot of SWEs consider these tradeoffs to be &amp;ldquo;political&amp;rdquo; or &amp;ldquo;non-technical&amp;rdquo; such as choosing a framework based on
+size of developer population using it or availability of commercial support. A good example of this might be Linux vs FreeBSD.
+There are arguments that &lt;code>FreeBSD&lt;/code> is technically superior, especially in areas like their &lt;code>ktls&lt;/code> implementation,
+but when looking at availability of expertise and support I believe &lt;code>Linux&lt;/code> will have more available.
+Netflix has some workloads that are essentially a &lt;code>ktls&lt;/code> and &lt;code>sendfile&lt;/code> benchmark, and they serve
+content at a large scale and &lt;code>FreeBSD&lt;/code> seems to be a great choice for them. For many other
+companies &lt;code>Linux&lt;/code> makes more sense due to features and support. Seems like
+it would be an uphill battle basing your &lt;code>k8s&lt;/code> SaaS on &lt;code>FreeBSD&lt;/code>.&lt;/p>
+&lt;h2 id="the-point">The point&lt;/h2>
+&lt;p>What I&amp;rsquo;d like to leave you with is a reminder that, when it comes to working as a software engineer, having decent
+CS knowledge is necessary but not sufficient. Try to keep an open mind about what individual engineers bring to the
+table because god knows we need more people who can deal with cost benefit analysis and large projects and people. You know,
+the things that &lt;span class="underline">actually&lt;/span> cause most engineering projects to fail.&lt;/p></content></item><item><title>Backtraces with strace</title><link>https://shane.ai/posts/backtraces-with-strace/</link><pubDate>Mon, 06 Nov 2023 16:22:00 -0700</pubDate><guid>https://shane.ai/posts/backtraces-with-strace/</guid><description>I discovered strace somewhere between my first part time web development part time job in 2005 and my first full time &amp;ldquo;software engineering&amp;rdquo; job in 2008, and it seemed like a superpower giving me x-ray vision into running infrastructure. When a process was stuck, or existing after a cryptic error message, instead of grepping around I could get a pretty good timeline of what the process was up to.
 It has some fatal flaws, the ptrace based technology can cause performance issues so it&amp;rsquo;s mostly not suited to running in production (unless you were one of my personal heros: the old mysql@facebook team which liked to live dangerously and often used ptrace based debuggers to obtain life profiling data).</description><content>&lt;p>I discovered &lt;a href="https://man7.org/linux/man-pages/man1/strace.1.html">strace&lt;/a> somewhere between my first part time web development part time job in 2005
 and my first full time &amp;ldquo;software engineering&amp;rdquo; job in 2008, and it seemed like a superpower giving me x-ray
 vision into running infrastructure. When a process was stuck, or existing after a cryptic error message,
@@ -162,7 +202,7 @@ machine. Having an outage due to thread pools where you expected to see a handfu
 &lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h2 id="wrap-up">Wrap up&lt;/h2>
 &lt;p>That&amp;rsquo;s all folks. I hope that you don&amp;rsquo;t need it, but if you ever do find yourself asking: &amp;ldquo;what code is touching that thing!?&amp;rdquo;
 &lt;code>strace --stack-traces&lt;/code> I hope you&amp;rsquo;ll land on this post and find that &lt;code>strace&lt;/code> is at your service.&lt;/p>
-&lt;p>Maybe in the future I&amp;rsquo;ll look at converting &lt;code>strace --stack-traces&lt;/code> output to something compatible with &lt;a href="https://profiler.firefox.com/">mozilla&amp;rsquo;s trace viewer&lt;/a>. That sounds fun.&lt;/p></content></item><item><title>Some notes on javascript jit and deopt</title><link>https://shane.ai/posts/notes-on-javascript-jit-deopt/</link><pubDate>Tue, 26 Sep 2023 13:34:00 -0700</pubDate><guid>https://shane.ai/posts/notes-on-javascript-jit-deopt/</guid><description>Recently I read a fantastic article walking through jit optimizations and how changes to source code could impact those: Side effecting a deopt.
+&lt;p>Maybe in the future I&amp;rsquo;ll look at converting &lt;code>strace --stack-traces&lt;/code> output to something compatible with &lt;a href="https://profiler.firefox.com/">mozilla&amp;rsquo;s trace viewer&lt;/a>. That sounds fun.&lt;/p></content></item><item><title>Some notes on javascript jit and deopt</title><link>https://shane.ai/posts/notes-on-javascript-jit-deopt/</link><pubDate>Tue, 26 Sep 2023 13:34:00 -0600</pubDate><guid>https://shane.ai/posts/notes-on-javascript-jit-deopt/</guid><description>Recently I read a fantastic article walking through jit optimizations and how changes to source code could impact those: Side effecting a deopt.
 As I shared it with folks, a few of them had some questions about low level optmizations in general and I wrote this as a little explainer for people who are interested in learning more about how javascript runtimes can model/compile/jit/execute their js code. So I wrote this explainer to go along with the original article.</description><content>&lt;p>Recently I read a fantastic article walking through jit optimizations
 and how changes to source code could impact those: &lt;a href="https://www.recompiled.dev/blog/deopt/">Side effecting a deopt&lt;/a>.&lt;/p>
 &lt;p>As I shared it with folks, a few of them had some questions about low level optmizations in general and
@@ -653,7 +693,7 @@ than it needs to be it&amp;rsquo;s still nice to know. Is it parsing JSON? Inter
 &lt;p>And ask yourself if that makes sense. At my current job alot of programs spend alot of time parsing protocol buffers. This is fairly reasonable. At previous
 jobs our caching edge ingress proxies spent alot of time gzipping uncacheable content and doing TLS. This was somewhat reasonable but pointed to opportunities
 to improve the customer experience by making more content cacheable.&lt;/p>
-&lt;p>Hopefully you found some of this informative, now go out there and put an application under a magnifying glass. I guarantee you&amp;rsquo;ll be surprised at what you find.&lt;/p></content></item><item><title>CGO Performance In Go 1.21</title><link>https://shane.ai/posts/cgo-performance-in-go1.21/</link><pubDate>Fri, 01 Sep 2023 14:42:00 -0700</pubDate><guid>https://shane.ai/posts/cgo-performance-in-go1.21/</guid><description>Tl;Dr Cgo calls take about 40ns, about the same time encoding/json takes to parse a single digit integer. On my 20 core machine Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.
+&lt;p>Hopefully you found some of this informative, now go out there and put an application under a magnifying glass. I guarantee you&amp;rsquo;ll be surprised at what you find.&lt;/p></content></item><item><title>CGO Performance In Go 1.21</title><link>https://shane.ai/posts/cgo-performance-in-go1.21/</link><pubDate>Fri, 01 Sep 2023 14:42:00 -0600</pubDate><guid>https://shane.ai/posts/cgo-performance-in-go1.21/</guid><description>Tl;Dr Cgo calls take about 40ns, about the same time encoding/json takes to parse a single digit integer. On my 20 core machine Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.
 Disclaimer While alot of this article argues that &amp;ldquo;Cgo performance is good actually&amp;rdquo;, please don&amp;rsquo;t take that to mean &amp;ldquo;Cgo is good actually&amp;rdquo;. I&amp;rsquo;ve maintained production applications that use Cgo and non-trivial bindings to lua.</description><content>&lt;h2 id="tl-dr">Tl;Dr&lt;/h2>
 &lt;p>Cgo calls take about 40ns, about the same time &lt;code>encoding/json&lt;/code> takes to parse a single digit integer. On my 20 core machine
 Cgo call performance scales with core count up to about 16 cores, after which some known contention issues slow things down.&lt;/p>
