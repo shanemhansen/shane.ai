@@ -1,7 +1,7 @@
 +++
 title = "CGO Performance In Go 1.21"
 author = ["shane"]
-date = 2023-09-01T14:42:00-07:00
+date = 2023-09-01T14:42:00-06:00
 draft = false
 +++
 
@@ -75,7 +75,7 @@ which is a great place to start.
 <a id="code-snippet--Call"></a>
 ```go
 func Call() {
-	// do less
+        // do less
 }
 ```
 
@@ -89,23 +89,23 @@ Go vs Cgo it's important to realize that the Go compiler can't inline Cgo functi
 ```go
 // helper to cut down on boilerplate
 func pbench(b *testing.B, f func()) {
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			f()
-		}
-	})
+        b.RunParallel(func(pb *testing.PB) {
+                for pb.Next() {
+                        f()
+                }
+        })
 
 }
 // Same as above, but explicitly calling the inlineable Call func.
 func BenchmarkEmptyCallInlineable(b *testing.B) {
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			Call()
-		}
-	})
+        b.RunParallel(func(pb *testing.PB) {
+                for pb.Next() {
+                        Call()
+                }
+        })
 }
 func BenchmarkEmptyCall(b *testing.B) {
-	pbench(b, Call)
+        pbench(b, Call)
 }
 ```
 
@@ -188,7 +188,7 @@ int trivial_add(int a, int b) {
 // wow this is easy
 // import "C"
 func CgoCall() {
-	C.trivial_add(1,2)
+        C.trivial_add(1,2)
 }
 ```
 
@@ -197,7 +197,7 @@ func CgoCall() {
 <a id="code-snippet--BenchmarkCgo"></a>
 ```go
 func BenchmarkCgoCall(b *testing.B) {
-	pbench(b, CgoCall)
+        pbench(b, CgoCall)
 }
 ```
 
@@ -269,18 +269,18 @@ library in both single threaded and parallel tests.
 <a id="code-snippet--BenchmarkJSON"></a>
 ```go
 func BenchmarkJSONCall(b *testing.B) {
-	msg := `1`
-	b.RunParallel(func(pb *testing.PB) {
-		var dst int
-		r := strings.NewReader(msg)
-		dec := json.NewDecoder(r)
-		for pb.Next() {
-			r.Seek(0, io.SeekStart)
-			if err := dec.Decode(&dst); err != nil {
-				panic(err)
-			}
-		}
-	})
+        msg := `1`
+        b.RunParallel(func(pb *testing.PB) {
+                var dst int
+                r := strings.NewReader(msg)
+                dec := json.NewDecoder(r)
+                for pb.Next() {
+                        r.Seek(0, io.SeekStart)
+                        if err := dec.Decode(&dst); err != nil {
+                                panic(err)
+                        }
+                }
+        })
 }
 ```
 

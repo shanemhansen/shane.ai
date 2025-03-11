@@ -1,7 +1,7 @@
 +++
 title = "Backtraces with strace"
 author = ["shane"]
-date = 2023-11-06T16:22:00-08:00
+date = 2023-11-06T16:22:00-07:00
 draft = false
 +++
 
@@ -31,17 +31,17 @@ Here is a simple go program that looks up the IP addresses associated with the `
 
 ```go
 import (
-	"net"
-	"fmt"
+        "net"
+        "fmt"
 )
 func main() {
-	names, err := net.LookupHost("shane.ai")
-	if err != nil {
-		panic(err)
-	}
-	for _, name := range names {
-		fmt.Printf("%s\n", name)
-	}
+        names, err := net.LookupHost("shane.ai")
+        if err != nil {
+                panic(err)
+        }
+        for _, name := range names {
+                fmt.Printf("%s\n", name)
+        }
 }
 ```
 

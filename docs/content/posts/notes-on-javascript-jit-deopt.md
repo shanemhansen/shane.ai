@@ -1,7 +1,7 @@
 +++
 title = "Some notes on javascript jit and deopt"
 author = ["shane"]
-date = 2023-09-26T13:34:00-07:00
+date = 2023-09-26T13:34:00-06:00
 draft = false
 +++
 
@@ -81,8 +81,8 @@ let size_of_person = 2;
 let age_offset = 1;
 person_2_age = RAM[
     persons_array +// where the array starts
-	size_of_person +// skip ahead 1
-	age_offset // age is 2nd value
+        size_of_person +// skip ahead 1
+        age_offset // age is 2nd value
 ];
 // or equivalantly: one addition. one ram lookup.
 person_2_age = RAM[persons_array+3];
@@ -187,7 +187,7 @@ Let's look at a javascript function from the blog:
 const x = { foo: 1 };
 
 function load() {
-	return x.foo;
+        return x.foo;
 }
 console.log(load());
 ```
