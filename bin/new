@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Append a new draft post heading to docs/content-org/all-posts.org.
+set -euo pipefail
+
+usage() {
+	cat <<'EOF'
+Usage: bin/new TITLE...
+
+Append a new draft post section to docs/content-org/all-posts.org.
+
+  * TODO TITLE
+  :PROPERTIES:
+  :EXPORT_FILE_NAME: <slug>.org
+  :END:
+
+The slug is the title lowercased, split on whitespace, and joined
+with '-' (e.g. "Agent Sandbox Explainer" -> agent-sandbox-explainer.org).
+ox-hugo swaps the .org extension for .md on export, it doesn't need
+to match anything else. Feel free to hand-edit the title/slug afterward.
+
+The heading starts in TODO with no date. When you flip it to DONE in
+Emacs, org-log-done adds the "CLOSED: [...]" timestamp automatically
+(that's how the existing posts got theirs) -- no need to set one here.
+
+Options:
+  -h, --help   Show this help and exit
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+	usage >&2
+	exit 1
+fi
+
+case "$1" in
+	-h|--help)
+		usage
+		exit 0
+		;;
+esac
+
+title="$*"
+slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' '-').org"
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+org_file="$root/docs/content-org/all-posts.org"
+
+{
+	echo
+	echo "* TODO $title"
+	echo ":PROPERTIES:"
+	echo ":EXPORT_FILE_NAME: $slug"
+	echo ":END:"
+	echo
+} >> "$org_file"
+
+echo "Appended '$title' ($slug) to $org_file"
