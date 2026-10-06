@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Share Your Photos</title>
+<style>
+  :root {
+    --bg: #faf7f2;
+    --ink: #2b2622;
+    --muted: #7a6f66;
+    --accent: #8a5a44;
+    --accent-ink: #fff;
+    --card: #ffffff;
+    --line: #e7dfd4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1917;
+      --ink: #f2ece4;
+      --muted: #b0a59a;
+      --accent: #d3a184;
+      --accent-ink: #1c1917;
+      --card: #26221f;
+      --line: #3a342f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  }
+  main { width: 100%; max-width: 420px; text-align: center; }
+  h1 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-weight: 400;
+    font-size: 2.2rem;
+    line-height: 1.15;
+    margin: 0 0 .5rem;
+  }
+  .lede { color: var(--muted); margin: 0 0 2rem; }
+  .btn {
+    display: block;
+    text-decoration: none;
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin: 0 0 14px;
+    text-align: left;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--ink);
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn strong { display: block; font-size: 1.1rem; }
+  .btn span { display: block; font-size: .9rem; opacity: .8; }
+  .note { color: var(--muted); font-size: .85rem; margin-top: 1.5rem; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Share your photos</h1>
+  <p class="lede">Thank you for celebrating with us! We'd love to see the day through your eyes.</p>
+
+  <a id="upload" class="btn primary" hidden>
+    <strong>Upload photos &amp; videos</strong>
+    <span>No app or account needed: tap, pick, done.</span>
+  </a>
+
+  <a id="album" class="btn" hidden>
+    <strong>See the shared album</strong>
+    <span>Browse everyone's photos (Google account needed to add).</span>
+  </a>
+
+  <p id="soon" class="lede" hidden>Photo sharing opens soon. Check back on the big day!</p>
+
+  <p class="note">Full-quality originals are best, so please don't send screenshots.</p>
+</main>
+<script>
+  // Fill in these links. Leave one empty to hide its button.
+  // uploadUrl: Dropbox File Request link (guests upload without an account).
+  // albumUrl:  Google Photos shared album link (optional, for browsing).
+  var CONFIG = {
+    uploadUrl: "https://www.dropbox.com/request/rjc694m87v46d6lzea4x",
+    albumUrl: "https://photos.app.goo.gl/obHnmZcLkCY3ke648"
+  };
+
+  var links = [["upload", CONFIG.uploadUrl], ["album", CONFIG.albumUrl]];
+  var shown = 0;
+  links.forEach(function (l) {
+    if (!l[1]) return;
+    var el = document.getElementById(l[0]);
+    el.href = l[1];
+    el.hidden = false;
+    shown++;
+  });
+  document.getElementById("soon").hidden = shown > 0;
+</script>
+</body>
+</html>
